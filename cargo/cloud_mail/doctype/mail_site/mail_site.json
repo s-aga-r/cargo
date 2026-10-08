@@ -9,7 +9,6 @@
   "title",
   "contact_email",
   "cluster",
-  "fc_reference",
   "column_break_main",
   "enabled",
   "status",
@@ -25,16 +24,11 @@
   "max_disk_gb",
   "default_disk_quota_gb",
   "access_section",
-  "api_key",
-  "api_secret",
-  "allowed_ips",
-  "column_break_access",
-  "user",
   "domain_verification_token"
  ],
  "fields": [
   {
-   "description": "The Frappe Cloud site domain, e.g. acme.frappe.cloud. Lowercased on save and used as the record name; it cannot change afterwards.",
+   "description": "Central's name for the site: what its tokens carry.",
    "fieldname": "site_name",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -68,12 +62,6 @@
    "reqd": 1,
    "search_index": 1,
    "set_only_once": 1
-  },
-  {
-   "description": "Frappe Cloud's own identifier for the site, passed at creation. Only for cross-referencing; nothing here depends on it.",
-   "fieldname": "fc_reference",
-   "fieldtype": "Data",
-   "label": "Frappe Cloud Reference"
   },
   {
    "fieldname": "column_break_main",
@@ -165,40 +153,7 @@
   {
    "fieldname": "access_section",
    "fieldtype": "Section Break",
-   "label": "API Access"
-  },
-  {
-   "description": "Sent by the site as Authorization: token key:secret with Frappe-Authorization-Source: Mail Site. Generated at creation and never changes.",
-   "fieldname": "api_key",
-   "fieldtype": "Data",
-   "label": "API Key",
-   "read_only": 1,
-   "unique": 1
-  },
-  {
-   "description": "Stored encrypted and shown once, at creation or after Rotate Secret. Rotating it invalidates the previous secret immediately.",
-   "fieldname": "api_secret",
-   "fieldtype": "Password",
-   "hidden": 1,
-   "label": "API Secret"
-  },
-  {
-   "description": "One per line: the IPv4 or IPv6 addresses, or CIDR ranges, the site's server sends from, as Frappe Cloud reports them. Set, only requests from these addresses may use the site's key; a leaked key is useless elsewhere. Blank accepts any address.",
-   "fieldname": "allowed_ips",
-   "fieldtype": "Small Text",
-   "label": "Allowed IP Addresses"
-  },
-  {
-   "fieldname": "column_break_access",
-   "fieldtype": "Column Break"
-  },
-  {
-   "description": "Requests authenticated with the site's key run as this service user. Taken from Mail Settings on every save.",
-   "fieldname": "user",
-   "fieldtype": "Link",
-   "label": "Service User",
-   "options": "User",
-   "read_only": 1
+   "label": "Domain Verification"
   },
   {
    "description": "Outbound mail of this site's domains leaves through this pool instead of the cluster default. A domain may name its own pool. The pool must belong to the site's cluster.",

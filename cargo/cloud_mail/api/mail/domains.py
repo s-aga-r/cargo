@@ -8,19 +8,22 @@ from cargo.cloud_mail.tenancy.addresses import assert_domain_not_reserved, valid
 from cargo.cloud_mail.tenancy.ownership import ownership_record
 
 
-@frappe.whitelist(methods=["GET", "POST"])
+# nosemgrep: guest-whitelisted-method -- site_api verifies the caller's token.
+@frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
 @site_api
 def list_domains() -> list[dict]:
 	return domain_payloads(owned_names("Mail Domain"))
 
 
-@frappe.whitelist(methods=["GET", "POST"])
+# nosemgrep: guest-whitelisted-method -- site_api verifies the caller's token.
+@frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
 @site_api
 def get_domain(domain: str) -> dict:
 	return owned("Mail Domain", domain).to_api()
 
 
-@frappe.whitelist(methods=["GET", "POST"])
+# nosemgrep: guest-whitelisted-method -- site_api verifies the caller's token.
+@frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
 @site_api
 def check_domain(domain: str) -> dict:
 	"""Whether the domain can be added, and the record the site must publish to prove it owns it.
@@ -39,7 +42,8 @@ def check_domain(domain: str) -> dict:
 	return {"domain": domain, "ownership_record": ownership_record(site, domain)}
 
 
-@frappe.whitelist(methods=["POST"])
+# nosemgrep: guest-whitelisted-method -- site_api verifies the caller's token.
+@frappe.whitelist(allow_guest=True, methods=["POST"])
 @site_api
 def create_domain(
 	domain: str,
@@ -68,7 +72,8 @@ def create_domain(
 	return doc.to_api()
 
 
-@frappe.whitelist(methods=["POST", "PUT"])
+# nosemgrep: guest-whitelisted-method -- site_api verifies the caller's token.
+@frappe.whitelist(allow_guest=True, methods=["POST", "PUT"])
 @site_api
 def update_domain(
 	domain: str,
@@ -96,19 +101,22 @@ def update_domain(
 	return doc.to_api()
 
 
-@frappe.whitelist(methods=["POST", "DELETE"])
+# nosemgrep: guest-whitelisted-method -- site_api verifies the caller's token.
+@frappe.whitelist(allow_guest=True, methods=["POST", "DELETE"])
 @site_api
 def delete_domain(domain: str) -> None:
 	owned("Mail Domain", domain).delete(ignore_permissions=True)
 
 
-@frappe.whitelist(methods=["GET", "POST"])
+# nosemgrep: guest-whitelisted-method -- site_api verifies the caller's token.
+@frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
 @site_api
 def get_dns_records(domain: str) -> dict:
 	return _records(owned("Mail Domain", domain))
 
 
-@frappe.whitelist(methods=["POST"])
+# nosemgrep: guest-whitelisted-method -- site_api verifies the caller's token.
+@frappe.whitelist(allow_guest=True, methods=["POST"])
 @site_api
 def refresh_dns_records(domain: str) -> dict:
 	"""Re-reads the records Stalwart expects (new DKIM selectors after a rotation, for instance)."""
@@ -122,7 +130,8 @@ def _records(doc) -> dict:
 	return {"domain": doc.domain_name, "is_verified": bool(doc.is_verified), **doc.records_payload()}
 
 
-@frappe.whitelist(methods=["POST"])
+# nosemgrep: guest-whitelisted-method -- site_api verifies the caller's token.
+@frappe.whitelist(allow_guest=True, methods=["POST"])
 @site_api
 def verify_dns_records(domain: str) -> dict:
 	return owned("Mail Domain", domain).verify_dns_records()

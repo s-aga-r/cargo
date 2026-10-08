@@ -1,8 +1,6 @@
 # Copyright (c) 2026, Frappe Technologies Pvt. Ltd. and contributors
 # For license information, please see license.txt
 
-import ipaddress
-
 import frappe
 from frappe import _
 from frappe.model.document import Document
@@ -28,8 +26,6 @@ class MailSite(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
-		api_key: DF.Data | None
-		api_secret: DF.Password | None
 		archived_at: DF.Datetime | None
 		cluster: DF.Link
 		contact_email: DF.Data | None
@@ -37,7 +33,6 @@ class MailSite(Document):
 		domain_verification_token: DF.Data | None
 		egress_pool: DF.Link | None
 		enabled: DF.Check
-		fc_reference: DF.Data | None
 		max_accounts: DF.Int
 		max_disk_gb: DF.Float
 		max_domains: DF.Int
@@ -47,7 +42,6 @@ class MailSite(Document):
 		site_name: DF.Data
 		title: DF.Data | None
 		status: DF.Literal["Active", "Suspended", "Archived"]
-		user: DF.Link | None
 	# end: auto-generated types
 
 	# --- lifecycle ------------------------------------------------------------
@@ -58,9 +52,7 @@ class MailSite(Document):
 
 	def before_insert(self) -> None:
 		self.status = "Active"
-		self.api_key = frappe.generate_hash(length=32)
-		self.new_secret = self.generate_secret()
-		self.domain_verification_token = frappe.generate_hash(length=32)
+		self.domain_verification_token = self.domain_verification_token or frappe.generate_hash(length=32)
 
 	def validate(self) -> None:
 		self.site_name = (self.site_name or "").strip().lower().rstrip("/")
@@ -70,9 +62,6 @@ class MailSite(Document):
 		if self.contact_email:
 			self.contact_email = self.contact_email.strip().lower()
 			frappe.utils.validate_email_address(self.contact_email, throw=True)
-		self.allowed_ips = "\n".join(str(n) for n in parse_networks(self.allowed_ips))
-
-		self.user = frappe.get_cached_doc("Mail Settings").site_service_user
 		self.validate_disk_quotas()
 
 		if self.is_new():
@@ -106,12 +95,7 @@ class MailSite(Document):
 		if frappe.db.exists("Mail Domain", {"site": self.name}):
 			frappe.throw(_("Delete the site's mail domains first."))
 
-	# --- secrets --------------------------------------------------------------
-
-	def generate_secret(self) -> str:
-		secret = frappe.generate_hash(length=40)
-		self.api_secret = secret
-		return secret
+	# --- actions --------------------------------------------------------------
 
 	@frappe.whitelist()
 	def adopt_directory(self) -> dict:
@@ -122,61 +106,61 @@ class MailSite(Document):
 
 		return adopt_directory(self.name)
 
-	@frappe.whitelist()
-	def rotate_secret(self) -> str:
-		"""Returns the new secret once; it is stored encrypted and never shown again."""
-
-		frappe.only_for("System Manager")
-		secret = self.generate_secret()
-		self.save(ignore_permissions=True)
-		return secret
-
 	# --- state ----------------------------------------------------------------
 
 	@frappe.whitelist()
 	def suspend(self) -> None:
+		frappe.only_for("System Manager")
+		self.stop()
+
+	@frappe.whitelist()
+	def resume(self) -> None:
+		frappe.only_for("System Manager")
+		self.restart()
+
+	@frappe.whitelist()
+	def archive(self, delete_data: bool = False) -> None:
+		frappe.only_for("System Manager")
+		self.retire(delete_data=delete_data)
+
+	def stop(self) -> None:
 		"""Stops the site's mail as well as its API: a status check holds off the directory calls,
 		the cluster role holds off every mailbox. Domains stay enabled, since disabling one drops
 		its verification and a suspension is meant to be lifted."""
 
-		frappe.only_for("System Manager")
 		if self.status == "Archived":
 			frappe.throw(_("An archived site cannot be suspended."))
 		self.db_set({"status": "Suspended"})
 		sync.lock_site_accounts(self.name, locked=True)
 
-	@frappe.whitelist()
-	def resume(self) -> None:
-		frappe.only_for("System Manager")
+	def restart(self) -> None:
 		if self.status == "Archived":
 			frappe.throw(_("An archived site cannot be resumed."))
 		self.db_set({"enabled": 1, "status": "Active"})
 		sync.lock_site_accounts(self.name, locked=False)
 
-	@frappe.whitelist()
-	def archive(self, delete_data: bool = False) -> None:
+	def retire(self, delete_data: bool = False) -> None:
 		"""Locks the site out and disables its domains, so they can be purged after their hold or
 		claimed by a new site that proves control afresh. With ``delete_data`` every directory
 		object is removed from Stalwart at once instead."""
 
-		frappe.only_for("System Manager")
 		self.db_set({"enabled": 0, "status": "Archived", "archived_at": now()})
 		if not delete_data:
 			sync.lock_site_accounts(self.name, locked=True)
 			self.disable_domains(_("The site was archived."))
 			self.db_set("domain_verification_token", frappe.generate_hash(length=32))
-		if delete_data:
-			if frappe.flags.do_not_enqueue:
-				purge_directory(self.name)
-			else:
-				frappe.enqueue(
-					purge_directory,
-					site=self.name,
-					queue="long",
-					job_id=f"purge-site:{self.name}",
-					deduplicate=True,
-					enqueue_after_commit=True,
-				)
+			return
+		if frappe.flags.do_not_enqueue:
+			purge_directory(self.name)
+		else:
+			frappe.enqueue(
+				purge_directory,
+				site=self.name,
+				queue="long",
+				job_id=f"purge-site:{self.name}",
+				deduplicate=True,
+				enqueue_after_commit=True,
+			)
 
 	def disable_domains(self, reason: str) -> None:
 		for name in frappe.get_all("Mail Domain", {"site": self.name, "enabled": 1}, pluck="name"):
@@ -295,18 +279,6 @@ class MailSite(Document):
 	def get_cluster(self) -> Document:
 		return frappe.get_cached_doc("Stalwart Cluster", self.cluster)
 
-	def allows_ip(self, ip: str | None) -> bool:
-		"""Whether a request from ``ip`` may use the site's key. No list means any address."""
-
-		networks = parse_networks(self.allowed_ips)
-		if not networks:
-			return True
-		try:
-			address = ipaddress.ip_address((ip or "").strip())
-		except ValueError:
-			return False
-		return any(address in network for network in networks)
-
 	def to_api(self) -> dict:
 		cluster = self.get_cluster()
 		return {
@@ -316,7 +288,7 @@ class MailSite(Document):
 			"title": self.title,
 			"contact_email": self.contact_email,
 			"enabled": bool(self.enabled),
-			"allowed_ips": self.allowed_ips.split("\n") if self.allowed_ips else [],
+			"mailboxes_allowed": bool(self.mailboxes_allowed),
 			"jmap_url": cluster.base_url,
 			"mail_hostname": cluster.hostname,
 			"limits": {
@@ -335,21 +307,6 @@ class MailSite(Document):
 				"allocated_disk_gb": self.allocated_disk_gb(),
 			},
 		}
-
-
-def parse_networks(text: str | None) -> list:
-	"""Addresses or CIDR ranges, one per line; a single address is its own /32 or /128."""
-
-	networks = []
-	for line in (text or "").splitlines():
-		value = line.strip()
-		if not value:
-			continue
-		try:
-			networks.append(ipaddress.ip_network(value, strict=False))
-		except ValueError:
-			frappe.throw(_("{0} is not an IP address or CIDR range.").format(value))
-	return networks
 
 
 def purge_directory(site: str) -> None:

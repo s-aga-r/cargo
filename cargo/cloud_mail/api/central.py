@@ -1,29 +1,33 @@
-"""Frappe Cloud endpoints: provisioning a Mail Site when a Suite-enabled site is created.
-
-Callers authenticate with a Frappe user carrying the "Frappe Cloud" role (standard API
-key/secret). The secret returned by ``create_site`` and ``rotate_site_secret`` is shown once;
-FC stores it in the site's configuration.
-"""
+"""Central's calls: a Mail Site for every site Central places in this region, its limits and
+entitlement, and its end. Central authenticates with a token carrying `mail:*`; a site's own
+token is refused here."""
 
 import frappe
 from frappe import _
+from frappe.utils import sbool
 
-from cargo.cloud_mail.api.site import as_list
-from cargo.cloud_mail.utils import child_rows
+from cargo.auth import verify_token
+from cargo.cloud_mail.doctype.stalwart_cluster.stalwart_cluster import region_cluster
 
-ROLE = "Frappe Cloud"
+SITE_FIELDS = (
+	"title",
+	"contact_email",
+	"max_domains",
+	"max_accounts",
+	"max_groups",
+	"max_mailing_lists",
+	"max_disk_gb",
+	"default_disk_quota_gb",
+)
 
 
-def require_frappe_cloud() -> None:
-	frappe.only_for((ROLE, "System Manager"))
-
-
-@frappe.whitelist(methods=["POST"])
+# nosemgrep: guest-whitelisted-method -- verify_token authenticates the caller below.
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@verify_token("mail:*")
 def create_site(
 	site: str,
-	cluster: str | None = None,
-	region: str | None = None,
-	fc_reference: str | None = None,
+	mailboxes_allowed: bool = True,
+	ownership_token: str | None = None,
 	title: str | None = None,
 	contact_email: str | None = None,
 	max_domains: int | None = None,
@@ -32,12 +36,11 @@ def create_site(
 	max_mailing_lists: int | None = None,
 	max_disk_gb: float | None = None,
 	default_disk_quota_gb: float | None = None,
-	allowed_ips: list[str] | str | None = None,
 ) -> dict:
-	"""``allowed_ips`` is the outbound addresses (or CIDR ranges) of the server hosting the site; set,
-	only requests from them may use the site's key."""
+	"""`site` is Central's name for the site, the string its tokens carry. `ownership_token` is
+	the team's, so one TXT record proves its domains in every region. A site that only sends
+	has `mailboxes_allowed` off."""
 
-	require_frappe_cloud()
 	site = (site or "").strip().lower()
 	if frappe.db.exists("Mail Site", site):
 		frappe.throw(_("Site {0} already exists.").format(site), frappe.DuplicateEntryError)
@@ -46,52 +49,31 @@ def create_site(
 		{
 			"doctype": "Mail Site",
 			"site_name": site,
-			"cluster": pick_cluster(cluster, region),
-			"fc_reference": fc_reference,
+			"cluster": region_cluster(),
+			"mailboxes_allowed": int(sbool(mailboxes_allowed)),
+			"domain_verification_token": ownership_token or None,
 		}
 	)
-	for field, value in {
-		"title": title,
-		"contact_email": contact_email,
-		"max_domains": max_domains,
-		"max_accounts": max_accounts,
-		"max_groups": max_groups,
-		"max_mailing_lists": max_mailing_lists,
-		"max_disk_gb": max_disk_gb,
-		"default_disk_quota_gb": default_disk_quota_gb,
-		"allowed_ips": ips_text(allowed_ips),
-	}.items():
-		if value is not None:
-			doc.set(field, value)
+	apply(doc, locals())
 	doc.insert(ignore_permissions=True)
 
 	frappe.local.response["http_status_code"] = 201
-	return {
-		**credentials(doc, doc.new_secret),
-		**doc.to_api(),
-		"suite_cloud_url": frappe.db.get_single_value("Cargo Settings", "cargo_url"),
-	}
+	return doc.to_api()
 
 
-@frappe.whitelist(methods=["GET", "POST"])
+# nosemgrep: guest-whitelisted-method -- verify_token authenticates the caller below.
+@frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
+@verify_token("mail:*")
 def get_site(site: str) -> dict:
-	require_frappe_cloud()
-	return {
-		**load(site).to_api(),
-		"suite_cloud_url": frappe.db.get_single_value("Cargo Settings", "cargo_url"),
-	}
+	return load(site).to_api()
 
 
-@frappe.whitelist(methods=["POST"])
-def rotate_site_secret(site: str) -> dict:
-	require_frappe_cloud()
-	doc = load(site)
-	return credentials(doc, doc.rotate_secret())
-
-
-@frappe.whitelist(methods=["POST", "PUT"])
+# nosemgrep: guest-whitelisted-method -- verify_token authenticates the caller below.
+@frappe.whitelist(allow_guest=True, methods=["POST", "PUT"])
+@verify_token("mail:*")
 def update_site(
 	site: str,
+	mailboxes_allowed: bool | None = None,
 	title: str | None = None,
 	contact_email: str | None = None,
 	max_domains: int | None = None,
@@ -100,52 +82,49 @@ def update_site(
 	max_mailing_lists: int | None = None,
 	max_disk_gb: float | None = None,
 	default_disk_quota_gb: float | None = None,
-	allowed_ips: list[str] | str | None = None,
 ) -> dict:
-	"""Changes the site's display name, contact address, limits or allowed addresses; omitted fields
-	stay as they are. An empty ``allowed_ips`` list lifts the address restriction."""
+	"""Changes the site's display name, contact address, limits or entitlement; omitted fields
+	stay as they are."""
 
-	require_frappe_cloud()
 	doc = load(site)
-	for field, value in {
-		"title": title,
-		"contact_email": contact_email,
-		"max_domains": max_domains,
-		"max_accounts": max_accounts,
-		"max_groups": max_groups,
-		"max_mailing_lists": max_mailing_lists,
-		"max_disk_gb": max_disk_gb,
-		"default_disk_quota_gb": default_disk_quota_gb,
-		"allowed_ips": ips_text(allowed_ips),
-	}.items():
-		if value is not None:
-			doc.set(field, value)
+	if mailboxes_allowed is not None:
+		doc.mailboxes_allowed = int(sbool(mailboxes_allowed))
+	apply(doc, locals())
 	doc.save(ignore_permissions=True)
-	return {**doc.to_api(), "suite_cloud_url": frappe.db.get_single_value("Cargo Settings", "cargo_url")}
+	return doc.to_api()
 
 
-@frappe.whitelist(methods=["POST"])
+# nosemgrep: guest-whitelisted-method -- verify_token authenticates the caller below.
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@verify_token("mail:*")
 def suspend_site(site: str) -> dict:
-	require_frappe_cloud()
 	doc = load(site)
-	doc.suspend()
+	doc.stop()
 	return doc.to_api()
 
 
-@frappe.whitelist(methods=["POST"])
+# nosemgrep: guest-whitelisted-method -- verify_token authenticates the caller below.
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@verify_token("mail:*")
 def resume_site(site: str) -> dict:
-	require_frappe_cloud()
 	doc = load(site)
-	doc.resume()
+	doc.restart()
 	return doc.to_api()
 
 
-@frappe.whitelist(methods=["POST"])
+# nosemgrep: guest-whitelisted-method -- verify_token authenticates the caller below.
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+@verify_token("mail:*")
 def archive_site(site: str, delete_data: bool = False) -> dict:
-	require_frappe_cloud()
 	doc = load(site)
-	doc.archive(delete_data=bool(delete_data))
+	doc.retire(delete_data=bool(sbool(delete_data)))
 	return doc.to_api()
+
+
+def apply(doc, values: dict) -> None:
+	for field in SITE_FIELDS:
+		if values.get(field) is not None:
+			doc.set(field, values[field])
 
 
 def load(site: str):
@@ -153,53 +132,3 @@ def load(site: str):
 	if not frappe.db.exists("Mail Site", site):
 		frappe.throw(_("Site {0} not found.").format(site), frappe.DoesNotExistError)
 	return frappe.get_doc("Mail Site", site)
-
-
-def ips_text(value: list[str] | str | None) -> str | None:
-	"""A list (or JSON or newline text) of addresses as the field stores it; None means unchanged."""
-
-	if value is None:
-		return None
-	return "\n".join(as_list(value))
-
-
-def credentials(doc, secret: str) -> dict:
-	return {"api_key": doc.api_key, "api_secret": secret, "authorization_source": "Mail Site"}
-
-
-def pick_cluster(cluster: str | None, region: str | None) -> str:
-	"""Named cluster; else one serving the region (default preferred); else the default; else a
-	cluster serving every region. A cluster with no regions serves any region."""
-
-	candidates = frappe.get_all(
-		"Stalwart Cluster",
-		filters={"enabled": 1, "status": "Active"},
-		fields=["name", "is_default"],
-		order_by="is_default desc, creation asc",
-	)
-	if cluster:
-		if not any(c.name == cluster for c in candidates):
-			frappe.throw(_("Cluster {0} is not active.").format(cluster))
-		return cluster
-
-	# The regions each cluster serves, one query for all candidates rather than a document each.
-	regions = child_rows(
-		"Stalwart Cluster Region", "Stalwart Cluster", [c.name for c in candidates], ["region"]
-	)
-	for c in candidates:
-		c.regions = {r.region for r in regions[c.name]}
-	wanted = (region or "").strip().lower()
-
-	if wanted:
-		regional = [c for c in candidates if c.regions and wanted in c.regions]
-		if regional:
-			return regional[0].name
-
-	default = next((c for c in candidates if c.is_default), None)
-	if not default:
-		default = next((c for c in candidates if not c.regions), None)
-	if not default:
-		if region:
-			frappe.throw(_("No active cluster serves region {0}.").format(region))
-		frappe.throw(_("No active cluster is available."))
-	return default.name

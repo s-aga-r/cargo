@@ -1,13 +1,11 @@
-"""Site-facing API: what a Frappe Suite site may do with its own slice of the directory.
+"""Site-facing API: what a site may do with its own slice of the directory.
 
-Authentication is Frappe's own API-key scheme pointed at the Mail Site DocType: the site
-sends ``Authorization: token <api_key>:<api_secret>`` plus ``Frappe-Authorization-Source:
-Mail Site``, which makes the request run as the shared site service user. Every endpoint
-then resolves the calling site from the key in the header and only ever touches documents
-owned by that site. Objects of other sites are reported as missing, never as forbidden.
+A site calls with a token Central minted for it, carrying the `mail` scope and the site's
+name in the `site` claim; Cargo verifies it against the key set it already trusts. Every
+endpoint then touches only documents owned by that site. Objects of other sites are reported
+as missing, never as forbidden.
 """
 
-import base64
 import functools
 import json
 from collections.abc import Callable
@@ -18,10 +16,10 @@ from frappe import _
 from frappe.query_builder.functions import Count
 from frappe.utils import cint
 
+from cargo.auth import SITE_CLAIM, SITE_SCOPE, verify_token
 from cargo.cloud_mail.stalwart.errors import StalwartRejectedError, StalwartUnauthorizedError
 
 OWNED_DOCTYPES = {"Mail Domain", "Mail Account", "Mail Group", "Mailing List"}
-MANAGER_ROLES = ("System Manager",)
 RATE_LIMIT = 300  # requests per site per minute
 ALIAS_CAP = 100  # aliases on one object; more than that is a list, not an account
 MEMBERSHIP_CAP = 500  # groups or members named in one request
@@ -36,10 +34,6 @@ class SiteSuspendedError(frappe.PermissionError):
 	pass
 
 
-class SiteAddressError(frappe.PermissionError):
-	"""The key is valid but the request did not come from one of the site's allowed addresses."""
-
-
 class StalwartRejected(frappe.ValidationError):
 	"""Stalwart refused the change; the type/description are safe to show the caller."""
 
@@ -47,7 +41,7 @@ class StalwartRejected(frappe.ValidationError):
 
 
 class ClusterMisconfiguredError(frappe.ValidationError):
-	"""Suite Cloud's own credentials for the cluster are wrong: an operator problem."""
+	"""Cargo's own credentials for the cluster are wrong: an operator problem."""
 
 	http_status_code = 502
 
@@ -64,44 +58,23 @@ def current_site():
 
 
 def _resolve_site():
-	api_key = _api_key_from_header()
-	service_user = frappe.get_cached_doc("Mail Settings").site_service_user
+	"""The site named by the token's `site` claim. Nothing else names one: operators work on
+	the desk, not through this API."""
 
-	if frappe.session.user == service_user and api_key:
-		name = frappe.db.get_value("Mail Site", {"api_key": api_key})
-	elif frappe.session.user != "Guest" and set(frappe.get_roles()) & set(MANAGER_ROLES):
-		# Operators may act on behalf of a site from the desk or a script.
-		name = frappe.form_dict.get("site") or frappe.get_request_header("X-Suite-Site")
-	else:
-		name = None
-
-	request_ip = getattr(frappe.local, "request_ip", None)
+	claims = getattr(frappe.local, "request_claims", None) or {}
+	name = claims.get(SITE_CLAIM)
 	if not name or not frappe.db.exists("Mail Site", name):
-		throttle(f"address:{request_ip or 'unknown'}")  # guessing keys is paced like everything else
 		raise SiteAuthError(_("Site authentication failed."))
 
 	site = frappe.get_cached_doc("Mail Site", name)
 	throttle(f"site:{site.name}")  # counted before any refusal, so refusals cannot be free
-	if not site.enabled or site.status != "Active":
-		raise SiteSuspendedError(_("Site {0} is {1}.").format(site.name, site.status.lower()))
-	if frappe.session.user == service_user and not site.allows_ip(request_ip):
-		# A key copied out of a site's config is worthless from anywhere but the site's own servers.
-		# Either the key has leaked or the site moved servers; operators need to know which.
-		log_refusal_once(site.name, request_ip, ", ".join((site.allowed_ips or "").split("\n")))
-		raise SiteAddressError(_("Site {0} does not accept requests from this address.").format(site.name))
+	if site.status == "Suspended":
+		# Told apart from a bad token on purpose: the site learns why it is being refused.
+		raise SiteSuspendedError(_("Site {0} is suspended.").format(site.name))
+	if site.status != "Active" or not site.enabled:
+		# Gone for good, or switched off: the token names a site this region no longer serves.
+		raise SiteAuthError(_("Site authentication failed."))
 	return site
-
-
-def _api_key_from_header() -> str | None:
-	scheme, _, credential = frappe.get_request_header("Authorization", "").partition(" ")
-	if scheme.lower() == "token":
-		return credential.split(":", 1)[0] or None
-	if scheme.lower() == "basic":
-		try:
-			return base64.b64decode(credential).decode().split(":", 1)[0] or None
-		except Exception:
-			return None
-	return None
 
 
 def throttle(subject: str) -> None:
@@ -111,7 +84,7 @@ def throttle(subject: str) -> None:
 		return
 
 	window = frappe.utils.now_datetime().strftime("%Y%m%d%H%M")
-	key = frappe.cache.make_key(f"suite_cloud:ratelimit:{subject}:{window}")
+	key = frappe.cache.make_key(f"cargo:mail:ratelimit:{subject}:{window}")
 	count = frappe.cache.incr(key)
 	if count == 1:
 		frappe.cache.expire(key, 90)
@@ -121,27 +94,9 @@ def throttle(subject: str) -> None:
 		)
 
 
-def log_refusal_once(site_name: str, request_ip: str | None, allowed: str) -> None:
-	"""One Error Log per site and address per ten minutes: a flood must not drown the signal,
-	and the row is inserted on the side so the refusal's rollback cannot discard it."""
-
-	key = f"suite_cloud:refused:{site_name}:{request_ip or 'unknown'}"
-	if frappe.cache.get_value(key):
-		return
-	frappe.cache.set_value(key, 1, expires_in_sec=600)
-	frappe.log_error(
-		title=f"[Suite Cloud] {site_name}: request from an address outside its allowed list",
-		message=_("Request from {0} to {1}; allowed: {2}").format(
-			request_ip or _("an unknown address"),
-			getattr(getattr(frappe.local, "request", None), "path", None) or "?",
-			allowed,
-		),
-		defer_insert=True,
-	)
-
-
 def site_api(fn: Callable) -> Callable:
-	"""Resolves the site, throttles, and turns Stalwart errors into API-shaped exceptions."""
+	"""Verifies the site's token, resolves and throttles the site, and turns Stalwart errors
+	into API-shaped exceptions."""
 
 	@functools.wraps(fn)
 	def wrapper(*args, **kwargs):
@@ -152,9 +107,9 @@ def site_api(fn: Callable) -> Callable:
 			raise StalwartRejected(_("The mail server rejected the change: {0}").format(_describe(e))) from e
 		except StalwartUnauthorizedError as e:
 			frappe.log_error(title="Cluster credentials rejected", message=str(e))
-			raise ClusterMisconfiguredError(_("The mail cluster refused Suite Cloud's credentials.")) from e
+			raise ClusterMisconfiguredError(_("The mail cluster refused Cargo's credentials.")) from e
 
-	return wrapper
+	return verify_token(SITE_SCOPE)(wrapper)
 
 
 def _describe(error: StalwartRejectedError) -> str:
@@ -295,7 +250,8 @@ def _as_list(value: Any) -> list[str]:
 	return [str(v).strip() for v in value if str(v).strip()]
 
 
-@frappe.whitelist(methods=["GET", "POST"])
+# nosemgrep: guest-whitelisted-method -- site_api verifies the caller's token.
+@frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
 @site_api
 def ping() -> dict:
 	"""Confirms the credentials and returns where the site's mail lives."""
@@ -303,7 +259,8 @@ def ping() -> dict:
 	return current_site().to_api()
 
 
-@frappe.whitelist(methods=["POST"])
+# nosemgrep: guest-whitelisted-method -- site_api verifies the caller's token.
+@frappe.whitelist(allow_guest=True, methods=["POST"])
 @site_api
 def update_site_profile(title: str | None = None, contact_email: str | None = None) -> dict:
 	"""What the site says about itself: its workspace name as the title, and where to reach it.

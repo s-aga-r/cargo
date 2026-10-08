@@ -7,7 +7,8 @@ from cargo.cloud_mail.stalwart.directory import DISK_QUOTA
 SCHEMA_CACHE_TTL = 3600
 
 
-@frappe.whitelist(methods=["GET", "POST"])
+# nosemgrep: guest-whitelisted-method -- site_api verifies the caller's token.
+@frappe.whitelist(allow_guest=True, methods=["GET", "POST"])
 @site_api
 def get_account_options() -> dict:
 	"""Locales and time zones the cluster accepts for accounts (from Stalwart's schema)."""

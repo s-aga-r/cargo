@@ -6,7 +6,6 @@
  "field_order": [
   "general_tab",
   "general_section",
-  "site_service_user",
   "skip_domain_verification",
   "verify_stalwart_tls",
   "jobs_section",
@@ -28,14 +27,6 @@
    "fieldname": "general_section",
    "fieldtype": "Section Break",
    "label": "General"
-  },
-  {
-   "description": "Every request from a Suite site runs as this user. It is created on install and needs no changes.",
-   "fieldname": "site_service_user",
-   "fieldtype": "Link",
-   "label": "Site Service User",
-   "options": "User",
-   "read_only": 1
   },
   {
    "default": "0",

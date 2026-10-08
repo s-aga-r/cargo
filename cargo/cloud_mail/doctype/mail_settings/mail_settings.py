@@ -25,7 +25,6 @@ class MailSettings(Document):
 		dmarc_report_retention_days: DF.Int
 		ownership_miss_limit: DF.Int
 		sign_with_ed25519: DF.Check
-		site_service_user: DF.Link | None
 		skip_domain_verification: DF.Check
 		tls_report_retention_days: DF.Int
 		verify_stalwart_tls: DF.Check
@@ -37,6 +36,8 @@ class MailSettings(Document):
 		self.validate_retention("ownership_miss_limit", DEFAULT_OWNERSHIP_MISS_LIMIT)
 
 	def on_update(self) -> None:
+		# Frappe drops the cached copy only after this hook, and the recheck below reads it.
+		frappe.clear_document_cache(self.doctype, self.name)
 		before = self.get_doc_before_save()
 		if before and cint(before.skip_domain_verification) and not cint(self.skip_domain_verification):
 			from cargo.cloud_mail.doctype.mail_domain.mail_domain import (

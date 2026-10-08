@@ -70,10 +70,8 @@ class TenancyTestCase(IntegrationTestCase):
 
 
 class TestMailSite(TenancyTestCase):
-	def test_site_gets_credentials_and_service_user(self) -> None:
-		self.assertEqual(len(self.site.api_key), 32)
-		self.assertEqual(len(self.site.new_secret), 40)
-		self.assertEqual(self.site.get_password("api_secret"), self.site.new_secret)
+	def test_site_starts_active_with_a_verification_token(self) -> None:
+		self.assertEqual(len(self.site.domain_verification_token), 32)
 		self.assertEqual(self.site.status, "Active")
 		self.assertEqual(self.site.to_api()["jmap_url"], self.cluster.base_url)
 
@@ -85,12 +83,7 @@ class TestMailSite(TenancyTestCase):
 		)
 		self.assertRaisesRegex(frappe.ValidationError, "not active", site.insert)
 
-	def test_rotate_suspend_archive(self) -> None:
-		old = self.site.get_password("api_secret")
-		new = self.site.rotate_secret()
-		self.assertNotEqual(old, new)
-		self.assertEqual(self.site.get_password("api_secret"), new)
-
+	def test_suspend_resume_archive(self) -> None:
 		self.make_domain()
 		running = self.make_account("a@acme.com")
 		paused = self.make_account("b@acme.com", enabled=0)

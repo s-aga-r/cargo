@@ -6,7 +6,6 @@ from frappe.tests import IntegrationTestCase
 from cargo.cloud_mail.api import central as fc
 from cargo.cloud_mail.api.mail import accounts, domains, groups, mailing_lists, meta
 from cargo.cloud_mail.api.site import (
-	SiteAddressError,
 	SiteAuthError,
 	SiteSuspendedError,
 	current_site,
@@ -30,6 +29,7 @@ from cargo.cloud_mail.tests.fixtures import (
 	make_site,
 	verified_ownership,
 )
+from cargo.testing import as_request, signed_token, trusted_test_keys, use_test_settings
 
 MAIL_DOMAIN = "cargo.cloud_mail.doctype.mail_domain.mail_domain"
 
@@ -37,7 +37,12 @@ MAIL_DOMAIN = "cargo.cloud_mail.doctype.mail_domain.mail_domain"
 class SiteApiTestCase(IntegrationTestCase):
 	def setUp(self) -> None:
 		frappe.flags.do_not_enqueue = True
+		use_test_settings()
 		configure_settings()
+		keys = trusted_test_keys()
+		keys.__enter__()
+		self.addCleanup(keys.__exit__, None, None, None)
+		self._request = None
 		self.cluster = activate_cluster(make_cluster())
 		self.fake = FakeStalwart(
 			base_url=self.cluster.base_url, admin_password=self.cluster.get_password("admin_password")
@@ -60,8 +65,7 @@ class SiteApiTestCase(IntegrationTestCase):
 		self.act_as(self.site)
 
 	def tearDown(self) -> None:
-		frappe.local.mail_site = None
-		frappe.local.request = None
+		self.act_as(None)
 		frappe.set_user("Administrator")
 		# Only the fixture sites: the dev site holds real accounts, and deleting those even
 		# inside the rolled-back transaction serialises each one, which asks the live cluster.
@@ -70,13 +74,25 @@ class SiteApiTestCase(IntegrationTestCase):
 				frappe.delete_doc(doctype, name, force=True, ignore_permissions=True, ignore_on_trash=True)
 		frappe.flags.do_not_enqueue = False
 
-	def act_as(self, site, secret: str = "any") -> None:
-		"""Simulates a request that Frappe already authenticated against the Mail Site key."""
+	def act_as(self, site, scope: str = "mail") -> None:
+		"""A guest request carrying the token Central mints for `site`; None ends the request."""
 
+		if self._request:
+			self._request.__exit__(None, None, None)
+			self._request = None
 		frappe.local.mail_site = None
-		frappe.set_user(frappe.db.get_single_value("Mail Settings", "site_service_user"))
-		frappe.local.request = frappe._dict(headers={"Authorization": f"token {site.api_key}:{secret}"})
 		frappe.local.form_dict = frappe._dict()
+		if site is None:
+			return
+		self._request = as_request(signed_token(scope, site=site.name))
+		self._request.__enter__()
+
+	def act_as_central(self) -> None:
+		"""A guest request carrying the token Central uses for its own calls."""
+
+		self.act_as(None)
+		self._request = as_request(signed_token("mail:*"))
+		self._request.__enter__()
 
 
 class TestSiteResolution(SiteApiTestCase):
@@ -106,72 +122,46 @@ class TestSiteResolution(SiteApiTestCase):
 		self.assertEqual(as_list(["a@x.com", " "]), ["a@x.com"])
 		self.assertRaises(frappe.ValidationError, as_list, "[not json")
 
-	def test_current_site_comes_from_the_authorization_header(self) -> None:
+	def test_current_site_comes_from_the_tokens_site_claim(self) -> None:
+		self.assertEqual(ping()["site"], self.site.name)
 		self.assertEqual(current_site().name, self.site.name)
 
-	def test_unknown_key_or_wrong_user_is_rejected(self) -> None:
-		frappe.local.request = frappe._dict(headers={"Authorization": "token nope:secret"})
-		frappe.local.mail_site = None
-		self.assertRaises(SiteAuthError, current_site)
+	def test_a_token_for_an_unknown_or_archived_site_is_refused(self) -> None:
+		self.act_as(frappe._dict(name="ghost.frappe.test"))
+		self.assertRaises(SiteAuthError, ping)
 
-		frappe.set_user("Guest")
-		frappe.local.request = frappe._dict(headers={"Authorization": f"token {self.site.api_key}:x"})
-		self.assertRaises(SiteAuthError, current_site)
+		self.other.db_set({"enabled": 0, "status": "Archived"})
+		frappe.clear_document_cache("Mail Site", self.other.name)
+		self.act_as(self.other)
+		self.assertRaises(SiteAuthError, ping)
 
-	def test_requests_must_come_from_an_allowed_address_when_set(self) -> None:
-		self.site.allowed_ips = "203.0.113.10\n2001:db8::/32\n 10.0.0.0/8 "
-		self.site.save(ignore_permissions=True)  # the fixture request runs as the service user
-		self.assertEqual(self.site.allowed_ips, "203.0.113.10/32\n2001:db8::/32\n10.0.0.0/8")
-		self.assertIn("allowed_ips", self.site.to_api())
-
-		for ip in ("203.0.113.10", "2001:db8:1::5", "10.20.30.40"):
-			self.act_as(self.site)
-			frappe.local.request_ip = ip
-			self.assertEqual(ping()["site"], self.site.name)
-		for key in frappe.cache.get_keys("suite_cloud:refused:*"):
-			frappe.cache.delete_value(key)
-		mock_log = patch("cargo.cloud_mail.api.site.frappe.log_error").start()
-		self.addCleanup(patch.stopall)
-		for ip in ("203.0.113.11", "192.168.1.1", None, "garbage"):
-			self.act_as(self.site)
-			frappe.local.request_ip = ip
-			self.assertRaisesRegex(SiteAddressError, "does not accept requests", ping)
-		# Each refusal leaves an Error Log naming the site and the address, for operators to act
-		# on; it is written on the side (deferred) so the refusal's own rollback keeps it, and a
-		# flood from one address is logged once per window.
-		frappe.local.request_ip = "192.168.1.1"
+	def test_only_a_sites_own_token_opens_the_directory_api(self) -> None:
+		# Central's wide token is for the lifecycle calls; the directory speaks to sites only.
+		self.act_as_central()
+		self.assertRaises(frappe.PermissionError, ping)
+		# A site's token, in turn, opens none of Central's calls.
 		self.act_as(self.site)
-		self.assertRaisesRegex(SiteAddressError, "does not accept requests", ping)
-		logged = [m for m in mock_log.call_args_list if "outside its allowed list" in m.kwargs["title"]]
-		self.assertEqual(len(logged), 4)
-		self.assertIn("garbage", logged[3].kwargs["message"])
-		self.assertTrue(all(m.kwargs["defer_insert"] for m in logged))
-
-		# Operators acting for the site from the desk are not the site's server.
-		frappe.local.request_ip = "192.168.1.1"
-		frappe.set_user("Administrator")
-		frappe.local.mail_site = None
-		frappe.local.form_dict = frappe._dict(site=self.site.name)
-		self.assertEqual(ping()["site"], self.site.name)
-		# No list means any address.
-		frappe.db.set_value("Mail Site", self.site.name, "allowed_ips", "")
-		frappe.clear_document_cache("Mail Site", self.site.name)
-		self.act_as(self.site)
-		self.assertEqual(ping()["site"], self.site.name)
-		frappe.local.request_ip = None
+		self.assertRaises(frappe.PermissionError, fc.get_site, self.site.name)
+		# Wrong audience, issuer or an expired token never reach the site lookup.
+		atlas = f"atlas:{frappe.db.get_single_value('Cargo Settings', 'region_id')}"
+		for token in (
+			signed_token("mail", site=self.site.name, aud="atlas-cargo:999"),
+			signed_token("mail", site=self.site.name, issuer=atlas),
+			signed_token("mail", site=self.site.name, expires_in=-60),
+			signed_token("mail"),
+		):
+			self.act_as(None)
+			self._request = as_request(token)
+			self._request.__enter__()
+			with patch("frappe.db.exists") as exists:
+				self.assertRaises(frappe.AuthenticationError, ping)
+			exists.assert_not_called()
 
 	def test_suspended_site_is_refused(self) -> None:
 		self.site.db_set({"enabled": 0, "status": "Suspended"})
 		frappe.clear_document_cache("Mail Site", self.site.name)
 		frappe.local.mail_site = None
-		self.assertRaises(SiteSuspendedError, current_site)
-
-	def test_managers_can_act_for_a_site(self) -> None:
-		frappe.set_user("Administrator")
-		frappe.local.mail_site = None
-		frappe.local.request = frappe._dict(headers={})
-		frappe.local.form_dict = frappe._dict(site=self.other.name)
-		self.assertEqual(current_site().name, self.other.name)
+		self.assertRaises(SiteSuspendedError, ping)
 
 
 class TestDomainOwnership(SiteApiTestCase):
@@ -280,6 +270,7 @@ class TestDomainOwnership(SiteApiTestCase):
 
 	def test_operators_add_domains_without_the_record(self) -> None:
 		target = "cargo.cloud_mail.tenancy.ownership.verify_dns_record"
+		self.act_as(None)
 		frappe.set_user("Administrator")
 		with patch(target, return_value=False) as verify:
 			frappe.get_doc(
@@ -696,58 +687,49 @@ class TestDirectoryApi(SiteApiTestCase):
 		self.assertFalse(frappe.db.exists("Mail Account", "carol@acme.com"))
 
 
-class TestFrappeCloudApi(SiteApiTestCase):
+class TestCentralApi(SiteApiTestCase):
 	def setUp(self) -> None:
 		super().setUp()
-		frappe.set_user("Administrator")
-		frappe.local.mail_site = None
-		# The site may hold a real default cluster; selection must land on the fixture cluster.
+		self.act_as_central()
+		# The site may hold a real default cluster; the region's cluster must be the fixture.
 		frappe.db.set_value("Stalwart Cluster", {"name": ["!=", self.cluster.name]}, "is_default", 0)
 		self.cluster.db_set("is_default", 1)
 
-	def test_create_site_returns_credentials_once(self) -> None:
-		with patch("cargo.cloud_mail.api.central.get_public_url", return_value="https://cloud.suite.test"):
-			result = fc.create_site(
-				"New.Frappe.Test", region="blr", fc_reference="site-42", contact_email="Ops@New.Test"
-			)
+	def test_central_registers_a_site_with_its_entitlement_and_limits(self) -> None:
+		result = fc.create_site(
+			"New.Frappe.Test",
+			contact_email="Ops@New.Test",
+			ownership_token="team-token",
+			mailboxes_allowed=False,
+		)
 
 		self.assertEqual(result["site"], "new.frappe.test")
 		self.assertEqual((result["title"], result["contact_email"]), ("new.frappe.test", "ops@new.test"))
+		self.assertEqual((result["cluster"], result["jmap_url"]), (self.cluster.name, self.cluster.base_url))
+		self.assertFalse(result["mailboxes_allowed"])
+		self.assertEqual(
+			frappe.db.get_value("Mail Site", "new.frappe.test", "domain_verification_token"), "team-token"
+		)
 		updated = fc.update_site(
-			"new.frappe.test", title="New Co", contact_email="admin@new.test", max_groups=7
+			"new.frappe.test",
+			title="New Co",
+			contact_email="admin@new.test",
+			max_groups=7,
+			mailboxes_allowed=True,
 		)
 		self.assertEqual(
 			(updated["title"], updated["contact_email"], updated["limits"]["max_groups"]),
 			("New Co", "admin@new.test", 7),
 		)
+		self.assertTrue(updated["mailboxes_allowed"])
 		self.assertRaises(
 			frappe.ValidationError, fc.update_site, "new.frappe.test", contact_email="not-an-address"
 		)
-		# Frappe Cloud passes the hosting server's outbound addresses; bad ones are refused.
-		self.assertEqual(
-			fc.update_site("new.frappe.test", allowed_ips=["203.0.113.10", "10.0.0.0/8"])["allowed_ips"],
-			["203.0.113.10/32", "10.0.0.0/8"],
-		)
-		self.assertEqual(fc.update_site("new.frappe.test", allowed_ips=[])["allowed_ips"], [])
-		self.assertRaisesRegex(
-			frappe.ValidationError, "not an IP", fc.update_site, "new.frappe.test", allowed_ips=["nope"]
-		)
-		self.assertEqual(result["cluster"], self.cluster.name)
-		self.assertEqual(result["jmap_url"], self.cluster.base_url)
-		self.assertEqual(result["suite_cloud_url"], "https://cloud.suite.test")
-		self.assertEqual(result["authorization_source"], "Mail Site")
-		self.assertEqual(len(result["api_secret"]), 40)
-		self.assertEqual(
-			frappe.get_doc("Mail Site", "new.frappe.test").get_password("api_secret"), result["api_secret"]
-		)
-		self.assertNotIn("api_secret", fc.get_site("new.frappe.test"))
+		self.assertEqual(fc.get_site("new.frappe.test")["title"], "New Co")
 		self.assertRaises(frappe.DuplicateEntryError, fc.create_site, "new.frappe.test")
+		self.assertRaises(frappe.DoesNotExistError, fc.get_site, "nobody.frappe.test")
 
-	def test_rotate_suspend_resume_archive(self) -> None:
-		rotated = fc.rotate_site_secret(self.site.name)
-		self.assertEqual(
-			frappe.get_doc("Mail Site", self.site.name).get_password("api_secret"), rotated["api_secret"]
-		)
+	def test_suspend_resume_archive(self) -> None:
 		self.assertEqual(fc.suspend_site(self.site.name)["status"], "Suspended")
 		self.assertEqual(fc.resume_site(self.site.name)["status"], "Active")
 		self.assertEqual(fc.archive_site(self.site.name)["status"], "Archived")
@@ -756,20 +738,3 @@ class TestFrappeCloudApi(SiteApiTestCase):
 		)
 		# Archived is final: neither suspend nor resume may bring the site back.
 		self.assertRaisesRegex(frappe.ValidationError, "archived", fc.suspend_site, self.site.name)
-
-	def test_cluster_selection(self) -> None:
-		self.assertEqual(fc.pick_cluster(None, None), self.cluster.name)
-		self.assertEqual(fc.pick_cluster(None, "BLR"), self.cluster.name)
-		self.assertEqual(fc.pick_cluster(None, "sfo"), self.cluster.name)  # falls back to the default
-		self.assertRaisesRegex(frappe.ValidationError, "not active", fc.pick_cluster, "missing", None)
-
-		# Without a default, a region nobody serves is refused unless some cluster serves all regions.
-		# The site may hold real clusters serving "blr", so the fixture gets a region of its own.
-		self.cluster.db_set("is_default", 0)
-		self.cluster.append("regions", {"region": "fixture-only"})
-		self.cluster.save()
-		self.assertRaisesRegex(
-			frappe.ValidationError, "serves region nowhere", fc.pick_cluster, None, "nowhere"
-		)
-		self.assertEqual(fc.pick_cluster(None, "FIXTURE-ONLY"), self.cluster.name)
-		self.cluster.db_set("is_default", 1)

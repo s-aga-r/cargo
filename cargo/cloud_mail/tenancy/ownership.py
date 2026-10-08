@@ -16,6 +16,7 @@ import frappe
 from frappe import _
 from frappe.utils import cint
 
+from cargo.auth import SITE_CLAIM
 from cargo.dns.resolver import verify_dns_record
 
 VALUE_PREFIX = "frappe-suite-verification="
@@ -37,7 +38,8 @@ def required() -> bool:
 	"""Whether the request has to prove control of the domain: a site's own, on a cloud that
 	checks."""
 
-	return frappe.session.user == settings().site_service_user and not skipped()
+	claims = getattr(frappe.local, "request_claims", None) or {}
+	return SITE_CLAIM in claims and not skipped()
 
 
 def skipped() -> bool:

@@ -1,3 +1,4 @@
+from contextlib import nullcontext
 from datetime import datetime
 from unittest.mock import patch
 
@@ -300,7 +301,7 @@ class TestTlsReports(SiteApiTestCase):
 
 		def retention(days: int):
 			frappe.db.set_single_value("Mail Settings", "tls_report_retention_days", days)
-			return patch.object(TLS_REPORTS, "retention_key", "tls_report_retention_days")
+			return nullcontext()
 
 		with retention(365):
 			TLS_REPORTS.prune_expired()
