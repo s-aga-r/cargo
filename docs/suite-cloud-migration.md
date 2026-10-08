@@ -377,7 +377,7 @@ SFU is a fourth consumer of phase 2b: one `Machine` with `public_ipv4`, the `car
 | Four teams on the critical path to the first real region | Phase 3a proves Cargo's part before any of them deliver; the checklist gates 3b. |
 | A dead node's IPv4 left in SPF is reissued to someone who then sends as the region's domains | Health detects death and resyncs SPF; `forget_node` before replacement; blocklist check before a new address is published. |
 | The port loses Ansible's `no_log` | Masking at the SSH boundary and the secret-leak test; a secret in a workflow record fails the suite. |
-| Stalwart's Prometheus exporter, store `update` operations, path-style S3, the outbound limiters, multi-node leases and stale `ClusterNode` rows are unverified on the pinned version | Each is confirmed on the 3b region before a phase depends on it. |
+| Stalwart's Prometheus exporter, its `/healthz/ready` endpoint, store `update` operations, path-style S3, the outbound limiters, multi-node leases and stale `ClusterNode` rows are unverified on the pinned version. Suite Cloud reads a node's state from the registry lease only | Each is confirmed on the 3b region before a phase depends on it. |
 | Mixed Stalwart versions on one Postgres during an upgrade | A per-release decision from the notes; the stop-all path otherwise. |
 | The platform domain's reputation is shared by every tenant | Per-site and per-domain outbound limiters; plain sites on their own egress pool. |
 | Account-wide DNS provider tokens | A delegated zone in an account holding nothing else. Suite Cloud's live run used DigitalOcean, so this differs from what was tested. |
