@@ -10,7 +10,6 @@ failed. The domain's TLS-RPT record sends the reports to postmaster@, where the 
 
 from __future__ import annotations
 
-
 from uuid import uuid7
 
 import frappe
