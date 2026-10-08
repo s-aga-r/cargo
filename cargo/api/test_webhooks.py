@@ -1,8 +1,6 @@
 # Copyright (c) 2026, Aradhya-Tripathi and Contributors
 # See license.txt
 
-from unittest.mock import patch
-
 import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils.password import get_decrypted_password
@@ -10,7 +8,7 @@ from frappe.utils.password import get_decrypted_password
 from cargo.api.webhooks import configure
 from cargo.telemetry.doctype.datum_server.datum_server import WEBHOOK_NAME as TELEMETRY_WEBHOOK
 from cargo.telemetry.doctype.datum_server.datum_server import configure_telemetry_webhook
-from cargo.testing import reset_datum_server, use_test_settings
+from cargo.testing import as_request, reset_datum_server, signed_token, trusted_test_keys, use_test_settings
 
 RECEIVER = "https://central.example.test/api/method/central.api.state_delivery.receive"
 SECRET = "a-shared-secret"
@@ -27,9 +25,9 @@ class UnitTestWebhookEnrolment(IntegrationTestCase):
 		self.addCleanup(frappe.db.rollback)
 
 	def enrol(self, **changes) -> dict:
-		"""The route as Central calls it, with the token check its own tests cover stood down."""
+		"""The route as Central calls it, with the token it mints for Cargo."""
 		payload = {"request_url": RECEIVER, "webhook_secret": SECRET, **changes}
-		with patch("cargo.auth.authenticate_request", return_value=frappe._dict()):
+		with trusted_test_keys(), as_request(signed_token("bucket:*")):
 			return configure(**payload)
 
 	def telemetry_host(self) -> None:

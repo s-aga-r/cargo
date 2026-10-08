@@ -51,7 +51,7 @@ def bucket_for(name: str, region: str) -> Bucket:
 
 # nosemgrep: guest-whitelisted-method -- verify_token authenticates the caller below.
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@verify_token
+@verify_token("bucket:*")
 def create_bucket(name: str, region: str) -> dict:
 	"""A bucket and the first key that opens it. The secret is handed back here and nowhere
 	else: Cargo keeps no copy a caller can read back."""
@@ -77,7 +77,7 @@ def create_bucket(name: str, region: str) -> dict:
 
 # nosemgrep: guest-whitelisted-method -- verify_token authenticates the caller below.
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@verify_token
+@verify_token("bucket:*")
 def delete_bucket(name: str, region: str) -> dict:
 	"""Drop a bucket and its keys. Garage refuses a non-empty bucket, so objects are safe."""
 	bucket_for(name, region).delete(ignore_permissions=True)
@@ -87,7 +87,7 @@ def delete_bucket(name: str, region: str) -> dict:
 
 # nosemgrep: guest-whitelisted-method -- verify_token authenticates the caller below.
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@verify_token
+@verify_token("bucket:*")
 def add_credentials(name: str, region: str) -> dict:
 	"""One more key for this bucket. The others keep working. Returned once."""
 	bucket = bucket_for(name, region)
@@ -99,7 +99,7 @@ def add_credentials(name: str, region: str) -> dict:
 
 # nosemgrep: guest-whitelisted-method -- verify_token authenticates the caller below.
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@verify_token
+@verify_token("bucket:*")
 def rotate_credentials(name: str, region: str, access_key: str) -> dict:
 	"""A new key for this bucket, and the end of the one it replaces. Returned once."""
 	bucket = bucket_for(name, region)
@@ -111,7 +111,7 @@ def rotate_credentials(name: str, region: str, access_key: str) -> dict:
 
 # nosemgrep: guest-whitelisted-method -- verify_token authenticates the caller below.
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@verify_token
+@verify_token("bucket:*")
 def remove_credentials(name: str, region: str, access_key: str) -> dict:
 	"""Take one key out of service. The bucket, its objects and its other keys stay."""
 	bucket = bucket_for(name, region)
@@ -123,7 +123,7 @@ def remove_credentials(name: str, region: str, access_key: str) -> dict:
 
 # nosemgrep: guest-whitelisted-method -- verify_token authenticates the caller below.
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@verify_token
+@verify_token("bucket:*")
 def get_usage(name: str, region: str) -> dict:
 	"""What this bucket holds, against its caps. A counter read, not a scan."""
 	return BucketUsageResponse(name=name, region=region, usage=bucket_for(name, region).get_usage()).asdict()
@@ -131,7 +131,7 @@ def get_usage(name: str, region: str) -> dict:
 
 # nosemgrep: guest-whitelisted-method -- verify_token authenticates the caller below.
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@verify_token
+@verify_token("bucket:*")
 def set_quota(name: str, size_gib: int, region: str, max_objects: int) -> dict:
 	"""This buckets quota in GIB and object count."""
 	if size_gib < 0 or max_objects < 0:
