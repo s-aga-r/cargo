@@ -9,7 +9,6 @@ from frappe.model.document import Document
 from frappe.utils import cint, flt
 from frappe.utils.password import set_encrypted_password
 
-from cargo.cloud_mail.cluster.plan import DISABLED_ROLE_DESCRIPTION
 from cargo.cloud_mail.stalwart import get_account_client
 from cargo.cloud_mail.stalwart.credentials import Credential
 from cargo.cloud_mail.stalwart.directory import DISK_QUOTA, GB, Account
@@ -119,7 +118,7 @@ class MailAccount(QuotaHolder, Document):
 		sync.push_create(self, "accounts", self.stalwart_payload(self.flags.password))
 		try:
 			self.mint_credential("app_password")
-			if not self.enabled:
+			if not self.enabled or not self.site_is_active():
 				self.push_enabled()
 		except Exception:
 			sync.push_destroy(self, "accounts")  # the insert rolls back; the account must not survive
@@ -176,21 +175,18 @@ class MailAccount(QuotaHolder, Document):
 		)
 
 	def push_enabled(self) -> None:
-		"""Disabled accounts keep receiving mail but lose every other permission via a cluster role."""
+		"""Disabled accounts, and every account of a site that is not Active, keep receiving mail
+		but lose every other permission via a cluster role."""
 
 		client = sync.client_for(self)
-		if self.enabled:
+		if self.enabled and self.site_is_active():
 			client.accounts.set_roles(self.stalwart_id, [])
 			return
 
-		role = client.roles.find_by_description(DISABLED_ROLE_DESCRIPTION)
-		if not role:
-			frappe.throw(
-				_("The cluster is missing the {0} role; sync its configuration.").format(
-					DISABLED_ROLE_DESCRIPTION
-				)
-			)
-		client.accounts.set_roles(self.stalwart_id, [role["id"]])
+		client.accounts.set_roles(self.stalwart_id, [sync.disabled_role_id(client)])
+
+	def site_is_active(self) -> bool:
+		return frappe.db.get_value("Mail Site", self.site, "status") == "Active"
 
 	# --- actions -------------------------------------------------------------------------
 

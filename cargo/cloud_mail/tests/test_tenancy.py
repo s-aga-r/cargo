@@ -91,19 +91,54 @@ class TestMailSite(TenancyTestCase):
 		self.assertNotEqual(old, new)
 		self.assertEqual(self.site.get_password("api_secret"), new)
 
+		self.make_domain()
+		running = self.make_account("a@acme.com")
+		paused = self.make_account("b@acme.com", enabled=0)
+		locked = self.fake.find("Role", description=DISABLED_ROLE_DESCRIPTION)["id"]
+
+		def roles(account):
+			return self.fake.get("Account", account.stalwart_id)["roles"]
+
 		self.site.suspend()
 		self.assertEqual(
 			frappe.db.get_value("Mail Site", self.site.name, ["enabled", "status"]), (1, "Suspended")
 		)
+		# Suspension locks every account the owner left enabled; one made meanwhile is born locked.
+		self.assertEqual(roles(running), {"@type": "Custom", "roleIds": {locked: True}})
+		self.assertEqual(roles(paused), {"@type": "Custom", "roleIds": {locked: True}})
+		newcomer = self.make_account("c@acme.com")
+		self.assertEqual(roles(newcomer), {"@type": "Custom", "roleIds": {locked: True}})
+
 		self.site.resume()
 		self.assertEqual(frappe.db.get_value("Mail Site", self.site.name, "status"), "Active")
+		# Resuming unlocks exactly what suspension locked; the owner's own disable stands.
+		self.assertEqual(roles(running), {"@type": "User"})
+		self.assertEqual(roles(newcomer), {"@type": "User"})
+		self.assertEqual(roles(paused), {"@type": "Custom", "roleIds": {locked: True}})
+		self.assertEqual(frappe.db.get_value("Mail Account", paused.name, "enabled"), 0)
 
-		self.make_domain()
-		self.make_account("a@acme.com")
+		token = self.site.domain_verification_token
+		self.site.archive()
+		self.site.reload()
+		self.assertEqual(self.site.status, "Archived")
+		self.assertNotEqual(self.site.domain_verification_token, token)
+		self.assertEqual(roles(running), {"@type": "Custom", "roleIds": {locked: True}})
+		domain = frappe.get_doc("Mail Domain", "acme.com")
+		self.assertEqual(
+			(domain.enabled, domain.is_verified, domain.disabled_reason), (0, 0, "The site was archived.")
+		)
+		self.assertTrue(domain.disabled_at)
+		self.assertFalse(self.fake.find("Domain", name="acme.com")["isEnabled"])
+
+		domain.enabled = 1
+		domain.save()
+		self.assertEqual((domain.disabled_at, domain.disabled_reason), (None, None))
+		self.site.db_set("status", "Active")
 		self.site.archive(delete_data=True)
 		self.assertEqual(frappe.db.get_value("Mail Site", self.site.name, "status"), "Archived")
 		self.assertFalse(frappe.db.exists("Mail Domain", "acme.com"))
-		self.assertEqual(self.fake.all("Domain"), [])
+		# Only the cluster's own domain is left on the fake.
+		self.assertEqual([d["name"] for d in self.fake.all("Domain")], [self.cluster.default_domain])
 		self.assertEqual([a for a in self.fake.all("Account") if a["name"] != "admin"], [])
 
 

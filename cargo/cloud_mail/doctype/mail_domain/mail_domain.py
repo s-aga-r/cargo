@@ -56,6 +56,8 @@ class MailDomain(Document):
 		catch_all_address: DF.Data | None
 		cluster: DF.Link | None
 		description: DF.Data | None
+		disabled_at: DF.Datetime | None
+		disabled_reason: DF.SmallText | None
 		discovery_records: DF.Table[MailDomainDNSRecord]
 		dns_zone_file: DF.Code | None
 		domain_name: DF.Data
@@ -114,9 +116,14 @@ class MailDomain(Document):
 			and frappe.db.get_value("Egress IP Pool", self.egress_pool, "cluster") != self.cluster
 		):
 			frappe.throw(_("Egress pool {0} belongs to another cluster.").format(self.egress_pool))
-		if not self.is_new() and self.has_value_changed("enabled") and not self.enabled:
-			# Proof of control lapses with the domain: enabling it again needs a fresh verification.
-			self.is_verified = 0
+		if not self.is_new() and self.has_value_changed("enabled"):
+			if self.enabled:
+				self.disabled_at = None
+				self.disabled_reason = None
+			else:
+				# Proof of control lapses with the domain: enabling it again needs a fresh verification.
+				self.is_verified = 0
+				self.disabled_at = now()
 		if ownership.skipped():
 			# The operator vouches for every tenant's domains: they count as verified for as long as
 			# they are enabled, and the hourly check leaves them alone. Marked, so that turning the
@@ -185,7 +192,7 @@ class MailDomain(Document):
 
 	def stalwart_patch(self) -> dict:
 		return {
-			"description": self.description or f"Suite site {self.site}",
+			"description": self.description or (f"Site {self.site}" if self.site else "Managed by Central"),
 			"isEnabled": self.is_live(),
 			"catchAllAddress": self.catch_all_address or None,
 			"subAddressing": {"@type": "Enabled" if self.sub_addressing else "Disabled"},

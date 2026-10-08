@@ -10,6 +10,8 @@
   "cluster",
   "column_break_main",
   "enabled",
+  "disabled_at",
+  "disabled_reason",
   "description",
   "stalwart_id",
   "settings_section",
@@ -78,6 +80,20 @@
    "fieldname": "enabled",
    "fieldtype": "Check",
    "label": "Enabled"
+  },
+  {
+   "fieldname": "disabled_at",
+   "fieldtype": "Datetime",
+   "label": "Disabled At",
+   "read_only": 1,
+   "depends_on": "eval:!doc.enabled"
+  },
+  {
+   "fieldname": "disabled_reason",
+   "fieldtype": "Small Text",
+   "label": "Disabled Reason",
+   "read_only": 1,
+   "depends_on": "eval:!doc.enabled"
   },
   {
    "description": "Free text shown on the cluster next to the domain. Blank falls back to the site's name.",

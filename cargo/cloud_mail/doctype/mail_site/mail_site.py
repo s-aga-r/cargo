@@ -10,6 +10,7 @@ from frappe.query_builder.functions import Sum
 from frappe.utils import cint, flt, now
 
 from cargo.cloud_mail.stalwart.directory import DISK_QUOTA, GB
+from cargo.cloud_mail.tenancy import sync
 
 DIRECTORY_DOCTYPES = ("Mail Account", "Mail Group", "Mailing List", "Mail Domain")
 
@@ -134,11 +135,15 @@ class MailSite(Document):
 
 	@frappe.whitelist()
 	def suspend(self) -> None:
-		# The key keeps authenticating so the site gets a 403 naming the suspension, not a bare 401.
+		"""Stops the site's mail as well as its API: a status check holds off the directory calls,
+		the cluster role holds off every mailbox. Domains stay enabled, since disabling one drops
+		its verification and a suspension is meant to be lifted."""
+
 		frappe.only_for("System Manager")
 		if self.status == "Archived":
 			frappe.throw(_("An archived site cannot be suspended."))
 		self.db_set({"status": "Suspended"})
+		sync.lock_site_accounts(self.name, locked=True)
 
 	@frappe.whitelist()
 	def resume(self) -> None:
@@ -146,13 +151,20 @@ class MailSite(Document):
 		if self.status == "Archived":
 			frappe.throw(_("An archived site cannot be resumed."))
 		self.db_set({"enabled": 1, "status": "Active"})
+		sync.lock_site_accounts(self.name, locked=False)
 
 	@frappe.whitelist()
 	def archive(self, delete_data: bool = False) -> None:
-		"""Locks the site out; with ``delete_data`` every directory object is removed from Stalwart too."""
+		"""Locks the site out and disables its domains, so they can be purged after their hold or
+		claimed by a new site that proves control afresh. With ``delete_data`` every directory
+		object is removed from Stalwart at once instead."""
 
 		frappe.only_for("System Manager")
 		self.db_set({"enabled": 0, "status": "Archived", "archived_at": now()})
+		if not delete_data:
+			sync.lock_site_accounts(self.name, locked=True)
+			self.disable_domains(_("The site was archived."))
+			self.db_set("domain_verification_token", frappe.generate_hash(length=32))
 		if delete_data:
 			if frappe.flags.do_not_enqueue:
 				purge_directory(self.name)
@@ -165,6 +177,13 @@ class MailSite(Document):
 					deduplicate=True,
 					enqueue_after_commit=True,
 				)
+
+	def disable_domains(self, reason: str) -> None:
+		for name in frappe.get_all("Mail Domain", {"site": self.name, "enabled": 1}, pluck="name"):
+			domain = frappe.get_doc("Mail Domain", name)
+			domain.enabled = 0
+			domain.disabled_reason = reason
+			domain.save(ignore_permissions=True)
 
 	# --- limits -----------------------------------------------------------------
 

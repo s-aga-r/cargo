@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING
 import frappe
 from frappe import _
 
+from cargo.cloud_mail.cluster.plan import DISABLED_ROLE_DESCRIPTION
 from cargo.cloud_mail.stalwart import get_client
-from cargo.cloud_mail.stalwart.directory import RECEIVE_PERMISSION, EmailAlias
+from cargo.cloud_mail.stalwart.directory import RECEIVE_PERMISSION, EmailAlias, roles_payload
 from cargo.cloud_mail.stalwart.errors import StalwartRejectedError
 from cargo.cloud_mail.tenancy.addresses import assert_address_available, validate_email_address
 
@@ -92,6 +93,39 @@ def aliases_payload(doc: Document) -> dict:
 def aliases_changed(before: Document, after: Document) -> bool:
 	key = lambda rows: sorted((r.alias_email, bool(r.enabled), r.description or "") for r in rows)  # noqa: E731
 	return key(before.aliases) != key(after.aliases)
+
+
+def disabled_role_id(client) -> str:
+	"""The role that keeps an account receiving mail and lets it do nothing else."""
+
+	role = client.roles.find_by_description(DISABLED_ROLE_DESCRIPTION)
+	if not role:
+		frappe.throw(
+			_("The cluster is missing the {0} role; sync its configuration.").format(
+				DISABLED_ROLE_DESCRIPTION
+			)
+		)
+	return role["id"]
+
+
+def lock_site_accounts(site: str, locked: bool) -> None:
+	"""Put every enabled account of a site onto the disabled role, or take them off it again.
+
+	Only accounts the owner left enabled are touched, so what suspension locked is exactly what
+	resuming unlocks, and an account the owner disabled stays disabled. One call per cluster."""
+
+	rows = frappe.get_all(
+		"Mail Account",
+		filters={"site": site, "enabled": 1, "stalwart_id": ["is", "set"]},
+		fields=["stalwart_id", "cluster"],
+	)
+	by_cluster: dict[str, list[str]] = {}
+	for row in rows:
+		by_cluster.setdefault(row.cluster, []).append(row.stalwart_id)
+	for cluster, ids in by_cluster.items():
+		client = get_client(frappe.get_cached_doc("Stalwart Cluster", cluster))
+		roles = roles_payload([disabled_role_id(client)] if locked else [])
+		client.accounts.update_many({account_id: {"roles": roles} for account_id in ids})
 
 
 def disabled_permissions(doc: Document) -> list[str]:
