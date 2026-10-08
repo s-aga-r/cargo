@@ -73,13 +73,14 @@ def assert_domain_live(domain) -> None:
 def assert_domain_available(domain_name: str, site: str) -> None:
 	"""Free for this site to add: unclaimed, and not a zone of the mail infrastructure itself."""
 
-	owner = frappe.db.get_value("Mail Domain", domain_name, "site")
-	if owner == site:
-		frappe.throw(
-			_("Domain {0} is already added to this site.").format(domain_name), frappe.DuplicateEntryError
-		)
-	if owner:
-		# Neutral on purpose: another site holding the name is not this site's business.
+	if frappe.db.exists("Mail Domain", domain_name):
+		if frappe.db.get_value("Mail Domain", domain_name, "site") == site:
+			frappe.throw(
+				_("Domain {0} is already added to this site.").format(domain_name),
+				frappe.DuplicateEntryError,
+			)
+		# Neutral on purpose: whoever holds the name, another site or Central, is not this
+		# site's business.
 		frappe.throw(_("Domain {0} is not available.").format(domain_name), frappe.DuplicateEntryError)
 	assert_domain_not_reserved(domain_name)
 
@@ -94,17 +95,22 @@ def assert_addresses_deliverable(site: str, emails: list[str]) -> None:
 	"""Addresses a site may route mail to: its own, or ones outside the platform.
 
 	An address under a domain that another site holds is refused as if it did not exist: a list
-	or catch-all pointing at it would inject mail into that site's mailboxes, unseen by it.
+	or catch-all pointing at it would inject mail into that site's mailboxes, unseen by it. A
+	domain nobody owns is foreign to every site, and a site's domain is foreign to it.
 	"""
 
 	domains = {e.split("@", 1)[1] for e in emails if "@" in e}
 	if not domains:
 		return
-	foreign = frappe.get_all(
-		"Mail Domain", {"name": ["in", list(domains)], "site": ["!=", site]}, pluck="name"
-	)
+	foreign = {
+		row.name
+		for row in frappe.get_all(
+			"Mail Domain", filters={"name": ["in", list(domains)]}, fields=["name", "site"]
+		)
+		if (row.site or "") != (site or "")
+	}
 	if foreign:
-		offending = sorted(e for e in emails if e.split("@", 1)[1] in set(foreign))
+		offending = sorted(e for e in emails if e.split("@", 1)[1] in foreign)
 		frappe.throw(_("Address {0} is not available.").format(offending[0]), frappe.DoesNotExistError)
 
 

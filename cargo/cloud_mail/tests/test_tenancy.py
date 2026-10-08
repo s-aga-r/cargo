@@ -336,6 +336,33 @@ class TestMailDomain(TenancyTestCase):
 		domain.save()
 		self.assertEqual(domain.catch_all_address, "inbox@acme.com")
 
+	def test_a_domain_without_a_site_is_managed_by_central(self) -> None:
+		shared = frappe.get_doc({"doctype": "Mail Domain", "domain_name": "shared.example", "is_verified": 1})
+		shared.insert()
+		self.assertEqual(shared.cluster, self.cluster.name)
+		self.assertEqual(self.fake.find("Domain", name="shared.example")["description"], "Managed by Central")
+
+		# Nobody may claim it, point mail at it, or learn who holds it.
+		self.assertRaisesRegex(
+			frappe.DuplicateEntryError,
+			"not available",
+			frappe.get_doc(
+				{"doctype": "Mail Domain", "domain_name": "shared.example", "site": self.site.name}
+			).insert,
+		)
+		domain = self.make_domain()
+		domain.catch_all_address = "inbox@shared.example"
+		self.assertRaisesRegex(frappe.DoesNotExistError, "not available", domain.save)
+		mailing_list = frappe.get_doc(
+			{"doctype": "Mailing List", "email": "all@acme.com", "site": self.site.name}
+		)
+		mailing_list.insert()
+		self.assertRaisesRegex(
+			frappe.DoesNotExistError, "not available", mailing_list.add_recipients, ["x@shared.example"]
+		)
+		shared.delete()
+		self.assertIsNone(self.fake.find("Domain", name="shared.example"))
+
 	def test_hourly_refresh_only_touches_domains_that_need_it(self) -> None:
 		from cargo.cloud_mail.doctype.mail_domain.mail_domain import refresh_rotating_domains
 

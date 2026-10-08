@@ -326,3 +326,15 @@ def check_all_clusters() -> None:
 			cluster.check_drift()
 		except Exception:
 			log_exception(f"Drift check failed for {name}", cluster)
+
+
+def region_cluster() -> str:
+	"""The cluster this region serves from. Until a region has exactly one, the default or
+	the only active one stands in."""
+
+	name = frappe.db.get_value("Stalwart Cluster", {"is_default": 1, "enabled": 1}) or frappe.db.get_value(
+		"Stalwart Cluster", {"status": "Active", "enabled": 1}
+	)
+	if not name:
+		frappe.throw(_("No Stalwart cluster serves this region yet."))
+	return name

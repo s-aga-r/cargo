@@ -11,12 +11,14 @@ from cargo.cloud_mail.cluster import dns as cluster_dns
 from cargo.cloud_mail.cluster import egress
 from cargo.cloud_mail.cluster.zone import GROUPS, build_domain_records, group_summaries
 from cargo.cloud_mail.doctype.dmarc_report.dmarc_report import DMARC_REPORTS
+from cargo.cloud_mail.doctype.stalwart_cluster.stalwart_cluster import region_cluster
 from cargo.cloud_mail.doctype.tls_report.tls_report import TLS_REPORTS
 from cargo.cloud_mail.stalwart.directory import Domain
 from cargo.cloud_mail.tenancy import ownership, sync
 from cargo.cloud_mail.tenancy.addresses import (
 	assert_addresses_deliverable,
 	assert_domain_available,
+	assert_domain_not_reserved,
 	validate_domain_name,
 	validate_email_address,
 )
@@ -81,14 +83,18 @@ class MailDomain(Document):
 	def validate(self) -> None:
 		self.domain_name = validate_domain_name(self.domain_name)
 		site = self.get_site()
-		self.cluster = site.cluster
+		self.cluster = site.cluster if site else self.cluster or region_cluster()
 		if self.is_new() and not self.flags.adopting:
-			# Proof of control comes first: only someone who controls the domain's DNS learns
-			# whether another site already holds it.
-			if ownership.required():
-				ownership.assert_ownership(site, self.domain_name)
-			assert_domain_available(self.domain_name, self.site)
-			site.assert_can_add_domain()
+			if not site:
+				# Central's own: nobody to prove control to, but the zones stay reserved.
+				assert_domain_not_reserved(self.domain_name)
+			else:
+				# Proof of control comes first: only someone who controls the domain's DNS learns
+				# whether another site already holds it.
+				if ownership.required():
+					ownership.assert_ownership(site, self.domain_name)
+				assert_domain_available(self.domain_name, self.site)
+				site.assert_can_add_domain()
 		if self.catch_all_address:
 			self.catch_all_address = validate_email_address(self.catch_all_address)
 			assert_addresses_deliverable(self.site, [self.catch_all_address])
@@ -157,7 +163,7 @@ class MailDomain(Document):
 	def stalwart_payload(self) -> Domain:
 		return Domain(
 			name=self.domain_name,
-			description=self.description or f"Suite site {self.site}",
+			description=self.description or (f"Site {self.site}" if self.site else "Managed by Central"),
 			is_enabled=self.is_live(),
 			dkim_algorithms=dkim_algorithms(),
 			catch_all_address=self.catch_all_address or None,
@@ -315,11 +321,11 @@ class MailDomain(Document):
 
 	# --- helpers -----------------------------------------------------------------------
 
-	def get_site(self) -> Document:
-		return frappe.get_cached_doc("Mail Site", self.site)
+	def get_site(self) -> Document | None:
+		return frappe.get_cached_doc("Mail Site", self.site) if self.site else None
 
 	def get_cluster(self) -> Document:
-		return frappe.get_cached_doc("Stalwart Cluster", self.cluster or self.get_site().cluster)
+		return frappe.get_cached_doc("Stalwart Cluster", self.cluster or region_cluster())
 
 	def to_api(self, with_records: bool = True) -> dict:
 		payload = domain_payload(self)

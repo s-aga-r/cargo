@@ -47,16 +47,14 @@
    "unique": 1
   },
   {
-   "description": "The Mail Site that owns the domain and administers it through the API. Fixed once the domain exists; it counts against the site's domain limit.",
+   "description": "The site that owns this domain. Empty for a domain Central manages.",
    "fieldname": "site",
    "fieldtype": "Link",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Site",
    "options": "Mail Site",
-   "reqd": 1,
-   "search_index": 1,
-   "set_only_once": 1
+   "search_index": 1
   },
   {
    "description": "The site's cluster, copied on every save. The domain is created on this cluster and its DNS records point at it.",
