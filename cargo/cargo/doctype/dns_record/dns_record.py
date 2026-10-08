@@ -8,7 +8,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, now
 
-from cargo.cargo.doctype.dns_zone.dns_zone import DEFAULT_TTL, get_default_zone
+from cargo.cargo.doctype.dns_zone.dns_zone import DEFAULT_TTL, settings_zone
 from cargo.dns import get_dns_provider
 from cargo.dns.resolver import verify_dns_record
 
@@ -28,9 +28,7 @@ class DNSRecord(Document):
 		is_verified: DF.Check
 		last_checked_at: DF.Datetime | None
 		managed_by: DF.DynamicLink | None
-		managed_by_doctype: DF.Literal[
-			"", "Stalwart Cluster", "Stalwart Node", "Egress Gateway", "Egress IP Pool"
-		]
+		managed_by_doctype: DF.Link | None
 		priority: DF.Int
 		ttl: DF.Int
 		type: DF.Literal["", "A", "AAAA", "CNAME", "MX", "TXT"]
@@ -44,7 +42,7 @@ class DNSRecord(Document):
 	def validate(self) -> None:
 		self.host = (self.host or "").strip().lower()
 		self.value = (self.value or "").strip()
-		self.dns_zone = self.dns_zone or get_default_zone()
+		self.dns_zone = self.dns_zone or settings_zone()
 		if not self.dns_zone:
 			frappe.throw(_("Create a DNS Zone before adding DNS Records."))
 		if self.is_new():

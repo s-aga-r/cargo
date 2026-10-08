@@ -11,7 +11,6 @@
   "default_ttl",
   "column_break_zone",
   "enabled",
-  "is_default",
   "provider_section",
   "dns_provider",
   "column_break_provider",
@@ -59,14 +58,6 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Enabled"
-  },
-  {
-   "default": "0",
-   "description": "Zone new clusters and manually created DNS Records use when none is picked.",
-   "fieldname": "is_default",
-   "fieldtype": "Check",
-   "in_list_view": 1,
-   "label": "Is Default"
   },
   {
    "fieldname": "provider_section",

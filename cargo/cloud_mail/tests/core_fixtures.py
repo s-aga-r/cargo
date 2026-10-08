@@ -4,7 +4,9 @@ from unittest.mock import patch
 
 import frappe
 
-ROOT_DOMAIN = "example.test"
+from cargo.testing import TEST_ZONE, make_dns_zone
+
+ROOT_DOMAIN = TEST_ZONE
 
 
 def configure_settings(**overrides) -> None:
@@ -20,18 +22,9 @@ def configure_settings(**overrides) -> None:
 
 
 def make_zone(domain_name: str = ROOT_DOMAIN, **fields):
-	"""The default zone every fixture cluster lives under; provider fields default to "by hand"."""
+	"""The default zone every fixture cluster lives under."""
 
-	if frappe.db.exists("DNS Zone", domain_name):
-		zone = frappe.get_doc("DNS Zone", domain_name)
-	else:
-		zone = frappe.new_doc("DNS Zone")
-		zone.domain_name = domain_name
-	zone.update({"enabled": 1, "is_default": 1, "dns_provider": "", **fields})
-	zone.flags.skip_dns_provider_verification = True
-	zone.save()
-	frappe.clear_document_cache("DNS Zone", domain_name)
-	return zone
+	return make_dns_zone(domain_name, **fields)
 
 
 def clear_request_cache() -> None:

@@ -23,6 +23,7 @@ SECRETS = {
 	"proxy_token": "test-proxy-token",
 }
 DATUM_SECRETS = ("datum_user_password", "insights_user_password", "default_user_password")
+TEST_ZONE = "example.test"
 
 
 def use_test_settings() -> None:
@@ -47,3 +48,19 @@ def reset_datum_server() -> None:
 		remove_encrypted_password("Datum Server", "Datum Server", field)
 
 	frappe.clear_document_cache("Datum Server", "Datum Server")
+
+
+def make_dns_zone(domain_name: str = TEST_ZONE, default: bool = True, **fields):
+	"""A zone whose records are published by hand, named on Cargo Settings unless told otherwise."""
+	if frappe.db.exists("DNS Zone", domain_name):
+		zone = frappe.get_doc("DNS Zone", domain_name)
+	else:
+		zone = frappe.new_doc("DNS Zone")
+		zone.domain_name = domain_name
+	zone.update({"enabled": 1, "dns_provider": "", **fields})
+	zone.flags.skip_dns_provider_verification = True
+	zone.save()
+	frappe.clear_document_cache("DNS Zone", domain_name)
+	if default:
+		frappe.db.set_single_value("Cargo Settings", "dns_zone", domain_name)
+	return zone

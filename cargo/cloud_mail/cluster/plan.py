@@ -16,7 +16,7 @@ import frappe
 
 from cargo.cloud_mail.stalwart.client import is_write_only
 from cargo.cloud_mail.stalwart.directory import dkim_management_payload
-from cargo.cloud_mail.utils import dkim_algorithms
+from cargo.cloud_mail.utils import dkim_algorithms, password_or_none
 
 if TYPE_CHECKING:
 	from frappe.model.document import Document
@@ -278,9 +278,54 @@ def default_domain(cluster: Document, with_dns: bool) -> dict:
 
 
 def dns_server_object(cluster: Document) -> dict | None:
-	"""The cluster zone's provider as a Stalwart DnsServer, or None when records are published by hand."""
+	"""The cluster zone's provider as a Stalwart DnsServer variant, used for ACME DNS-01.
 
-	return frappe.get_cached_doc("DNS Zone", cluster.dns_zone).stalwart_dns_server()
+	Field names follow stalw.art/docs/ref/object/dns-server; confirm the less common providers
+	with ``stalwart-cli describe DnsServer`` before relying on them."""
+
+	zone = frappe.get_cached_doc("DNS Zone", cluster.dns_zone)
+	if not zone.dns_provider:
+		return None
+
+	def secret(field: str) -> dict | None:
+		# SecretKey fields are a union; a literal value is the "Value" variant.
+		value = password_or_none(zone, field)
+		return {"@type": "Value", "secret": value} if value else None
+
+	base = {"description": f"cargo-{zone.domain_name}", "ttl": 300000}
+	match zone.dns_provider:
+		case "Cloudflare":
+			return {**base, "@type": "Cloudflare", "secret": secret("dns_provider_token")}
+		case "AmazonRoute53":
+			return {
+				**base,
+				"@type": "Route53",
+				"accessKeyId": zone.dns_provider_access_key,
+				"secretAccessKey": secret("dns_provider_access_secret"),
+				"region": "us-east-1",
+			}
+		case "DigitalOcean":
+			return {**base, "@type": "DigitalOcean", "secret": secret("dns_provider_token")}
+		case "Hetzner":
+			return {**base, "@type": "Hetzner", "secret": secret("dns_provider_token")}
+		case "Linode":
+			return {**base, "@type": "Linode", "secret": secret("dns_provider_token")}
+		case "Namecheap":
+			return {
+				**base,
+				"@type": "Namecheap",
+				"username": zone.dns_provider_username,
+				"apiKey": secret("dns_provider_token"),
+				"clientIp": zone.dns_provider_client_ip,
+			}
+		case "GoDaddy":
+			return {
+				**base,
+				"@type": "GoDaddy",
+				"apiKey": zone.dns_provider_key,
+				"secret": secret("dns_provider_secret"),
+			}
+	return None
 
 
 def admin_account_operation(server: Document) -> dict:

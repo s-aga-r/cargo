@@ -8,7 +8,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import now
 
-from cargo.cargo.doctype.dns_zone.dns_zone import get_default_zone
+from cargo.cargo.doctype.dns_zone.dns_zone import settings_zone
 from cargo.cloud_mail.cluster import bootstrap, dns, egress, naming, plan, reconcile
 from cargo.cloud_mail.stalwart import forget_sessions, get_admin_client, get_client
 from cargo.cloud_mail.stalwart.credentials import Credential
@@ -123,7 +123,7 @@ class StalwartCluster(Document):
 	def resolve_label(self) -> None:
 		"""Label + zone give the hostname and default domain; both are fixed once the cluster exists."""
 
-		self.dns_zone = self.dns_zone or get_default_zone()
+		self.dns_zone = self.dns_zone or settings_zone()
 		if not self.dns_zone:
 			frappe.throw(_("Create a DNS Zone before creating clusters."))
 		self.label = (self.label or "").strip().lower() or naming.next_cluster_label(self.dns_zone)

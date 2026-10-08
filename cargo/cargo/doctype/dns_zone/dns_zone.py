@@ -49,7 +49,6 @@ class DNSZone(Document):
 		dns_provider_zone_id: DF.Data | None
 		domain_name: DF.Data
 		enabled: DF.Check
-		is_default: DF.Check
 	# end: auto-generated types
 
 	def before_insert(self) -> None:
@@ -57,22 +56,12 @@ class DNSZone(Document):
 
 	def validate(self) -> None:
 		self.normalise_domain_name()
-		self.validate_default()
 		self.validate_provider()
 
 	def normalise_domain_name(self) -> None:
 		self.domain_name = (self.domain_name or "").strip().lower().rstrip(".")
 		if not self.domain_name or "." not in self.domain_name:
 			frappe.throw(_("Domain Name must be a registrable domain, e.g. frappemail.com."))
-
-	def validate_default(self) -> None:
-		if self.is_default and not self.enabled:
-			frappe.throw(_("The default zone must be enabled."))
-		if not self.is_default:
-			return
-		frappe.db.set_value(
-			"DNS Zone", {"is_default": 1, "name": ["!=", self.name]}, "is_default", 0, update_modified=False
-		)
 
 	def validate_provider(self) -> None:
 		"""Checks the provider credentials are complete and, when they changed, that they work."""
@@ -102,11 +91,6 @@ class DNSZone(Document):
 				if not self.dns_provider_key or not self.dns_provider_secret:
 					frappe.throw(_("Please set the DNS Provider Key and Secret."))
 
-	def on_trash(self) -> None:
-		# Link integrity covers clusters and records; only the zone's own defaults need care.
-		if self.is_default and frappe.db.exists("DNS Zone", {"name": ["!=", self.name]}):
-			frappe.throw(_("Mark another zone as default before deleting this one."))
-
 	# --- provider access ------------------------------------------------------
 
 	def get_provider(self) -> DNSProvider | None:
@@ -129,64 +113,11 @@ class DNSZone(Document):
 			private_zone=bool(self.dns_provider_private_zone),
 		)
 
-	def stalwart_dns_server(self) -> dict | None:
-		"""The zone's provider as a Stalwart DnsServer variant, used for ACME DNS-01.
 
-		Field names follow stalw.art/docs/ref/object/dns-server; confirm the less common providers
-		with ``stalwart-cli describe DnsServer`` before relying on them.
-		"""
+def settings_zone() -> str | None:
+	"""The zone Cargo publishes its service records in, named on Cargo Settings."""
 
-		if not self.dns_provider:
-			return None
-
-		def secret(field: str) -> dict | None:
-			# SecretKey fields are a union; a literal value is the "Value" variant.
-			value = password_or_none(self, field)
-			return {"@type": "Value", "secret": value} if value else None
-
-		base = {"description": f"suite-cloud-{self.domain_name}", "ttl": 300000}
-		match self.dns_provider:
-			case "Cloudflare":
-				return {**base, "@type": "Cloudflare", "secret": secret("dns_provider_token")}
-			case "AmazonRoute53":
-				return {
-					**base,
-					"@type": "Route53",
-					"accessKeyId": self.dns_provider_access_key,
-					"secretAccessKey": secret("dns_provider_access_secret"),
-					"region": "us-east-1",
-				}
-			case "DigitalOcean":
-				return {**base, "@type": "DigitalOcean", "secret": secret("dns_provider_token")}
-			case "Hetzner":
-				return {**base, "@type": "Hetzner", "secret": secret("dns_provider_token")}
-			case "Linode":
-				return {**base, "@type": "Linode", "secret": secret("dns_provider_token")}
-			case "Namecheap":
-				return {
-					**base,
-					"@type": "Namecheap",
-					"username": self.dns_provider_username,
-					"apiKey": secret("dns_provider_token"),
-					"clientIp": self.dns_provider_client_ip,
-				}
-			case "GoDaddy":
-				return {
-					**base,
-					"@type": "GoDaddy",
-					"apiKey": self.dns_provider_key,
-					"secret": secret("dns_provider_secret"),
-				}
-		return None
-
-
-def get_default_zone() -> str | None:
-	"""The zone flagged default, or the only enabled zone when there is exactly one."""
-
-	if default := frappe.db.get_value("DNS Zone", {"is_default": 1, "enabled": 1}, "name"):
-		return default
-	zones = frappe.get_all("DNS Zone", {"enabled": 1}, pluck="name", limit=2)
-	return zones[0] if len(zones) == 1 else None
+	return frappe.db.get_single_value("Cargo Settings", "dns_zone")
 
 
 def relative_host(fqdn: str, zone: str) -> str:

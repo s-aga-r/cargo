@@ -147,10 +147,10 @@
   {
    "description": "Records owned by a cluster, node, gateway or pool are created and removed with it. Blank means created by hand.",
    "fieldname": "managed_by_doctype",
-   "fieldtype": "Select",
+   "fieldtype": "Link",
    "in_standard_filter": 1,
    "label": "Managed By Type",
-   "options": "\nStalwart Cluster\nStalwart Node\nEgress Gateway\nEgress IP Pool",
+   "options": "DocType",
    "read_only": 1,
    "set_only_once": 1
   },
