@@ -292,5 +292,19 @@ scheduler_events = {
 	},
 	"hourly": [
 		"cargo.object_storage.health.prune_history",
+		# A customer domain goes live once its records resolve, and a DKIM key the cluster was
+		# still generating is picked up on the next pass. A failed lookup never turns one off.
+		"cargo.cloud_mail.doctype.mail_domain.mail_domain.refresh_rotating_domains",
+		"cargo.cloud_mail.doctype.mail_domain.mail_domain.verify_unverified_domains",
+		"cargo.cloud_mail.doctype.dmarc_report.dmarc_report.fetch_all_clusters",
+		"cargo.cloud_mail.doctype.tls_report.tls_report.fetch_all_clusters",
+	],
+	"daily": [
+		"cargo.cargo.doctype.dns_record.dns_record.verify_all_dns_records",
+		"cargo.cloud_mail.doctype.stalwart_cluster.stalwart_cluster.check_all_clusters",
+		"cargo.cloud_mail.doctype.stalwart_node.stalwart_node.verify_all_ptr_records",
+		"cargo.cloud_mail.doctype.egress_ip_pool.egress_ip_pool.verify_all_ptr_records",
+		"cargo.cloud_mail.doctype.dmarc_report.dmarc_report.prune_expired_reports",
+		"cargo.cloud_mail.doctype.tls_report.tls_report.prune_expired_reports",
 	],
 }
