@@ -306,5 +306,6 @@ scheduler_events = {
 		"cargo.cloud_mail.doctype.egress_ip_pool.egress_ip_pool.verify_all_ptr_records",
 		"cargo.cloud_mail.doctype.dmarc_report.dmarc_report.prune_expired_reports",
 		"cargo.cloud_mail.doctype.tls_report.tls_report.prune_expired_reports",
+		"cargo.cloud_mail.doctype.mail_domain.mail_domain.purge_disabled_domains",
 	],
 }

@@ -960,6 +960,49 @@ class TestMailAccount(TenancyTestCase):
 		self.assertEqual(self.fake.get("Account", account.stalwart_id)["memberGroupIds"], {})
 
 
+class TestRetention(TenancyTestCase):
+	def test_an_archived_sites_domains_are_purged_after_their_hold(self) -> None:
+		from cargo.cloud_mail.doctype.mail_domain.mail_domain import purge_disabled_domains
+
+		self.make_domain()
+		account = self.make_account("a@acme.com")
+		self.site.archive()
+		living = make_site(self.cluster, "living.frappe.test")
+		kept = frappe.get_doc(
+			{"doctype": "Mail Domain", "domain_name": "kept.com", "site": living.name, "is_verified": 1}
+		).insert()
+		kept.enabled = 0
+		kept.save()
+		long_ago = frappe.utils.add_days(frappe.utils.now_datetime(), -91)
+		frappe.db.set_value("Mail Domain", ["acme.com", "kept.com"], "disabled_at", long_ago)
+
+		purge_disabled_domains()
+		# The archived site's domain and its mailbox are gone; the living site's wait for their owner.
+		self.assertFalse(frappe.db.exists("Mail Domain", "acme.com"))
+		self.assertFalse(frappe.db.exists("Mail Account", account.name))
+		self.assertIsNone(self.fake.find("Domain", name="acme.com"))
+		self.assertTrue(frappe.db.exists("Mail Domain", "kept.com"))
+
+	def test_a_new_site_may_claim_an_archived_sites_domain(self) -> None:
+		self.make_domain()
+		self.make_account("a@acme.com")
+		other = make_site(self.cluster, "other.frappe.test")
+		theirs = frappe.get_doc(
+			{"doctype": "Mail Domain", "domain_name": "acme.com", "site": other.name, "is_verified": 1}
+		)
+		# Held by a living site: not available, whatever its state.
+		self.assertRaisesRegex(frappe.DuplicateEntryError, "not available", theirs.insert)
+		self.site.disable_domains("paused")
+		self.assertRaisesRegex(frappe.DuplicateEntryError, "not available", theirs.insert)
+
+		self.site.archive()
+		theirs.insert()
+		# The old holder's copy and its mailbox went with the claim; the fake holds one acme.com.
+		self.assertEqual(frappe.db.get_value("Mail Domain", "acme.com", "site"), other.name)
+		self.assertFalse(frappe.db.exists("Mail Account", "a@acme.com"))
+		self.assertEqual(len([d for d in self.fake.all("Domain") if d["name"] == "acme.com"]), 1)
+
+
 class TestEntitlement(TenancyTestCase):
 	def test_a_site_without_mailboxes_only_sends(self) -> None:
 		self.site.db_set("mailboxes_allowed", 0)

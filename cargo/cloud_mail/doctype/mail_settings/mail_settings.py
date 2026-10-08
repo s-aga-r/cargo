@@ -8,6 +8,8 @@ from frappe.utils import cint
 
 from cargo.cloud_mail.reports import DEFAULT_RETENTION_DAYS
 
+DEFAULT_DOMAIN_RETENTION_DAYS = 90
+
 
 class MailSettings(Document):
 	# begin: auto-generated types
@@ -18,6 +20,7 @@ class MailSettings(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		disabled_domain_retention_days: DF.Int
 		dmarc_report_retention_days: DF.Int
 		sign_with_ed25519: DF.Check
 		site_service_user: DF.Link | None
@@ -28,6 +31,7 @@ class MailSettings(Document):
 
 	def validate(self) -> None:
 		self.validate_report_retention()
+		self.validate_retention("disabled_domain_retention_days", DEFAULT_DOMAIN_RETENTION_DAYS)
 
 	def on_update(self) -> None:
 		before = self.get_doc_before_save()
@@ -39,10 +43,13 @@ class MailSettings(Document):
 			enqueue_recheck_of_vouched_domains()
 
 	def validate_report_retention(self) -> None:
+		for field in ("dmarc_report_retention_days", "tls_report_retention_days"):
+			self.validate_retention(field, DEFAULT_RETENTION_DAYS)
+
+	def validate_retention(self, field: str, default: int) -> None:
 		# A site set up before a field existed has it empty: the default applies rather than a
 		# refusal to save anything else. An explicit value under a day is still a mistake.
-		for field in ("dmarc_report_retention_days", "tls_report_retention_days"):
-			if self.get(field) in (None, ""):
-				self.set(field, DEFAULT_RETENTION_DAYS)
-			elif cint(self.get(field)) < 1:
-				frappe.throw(_("{0} must be at least one day.").format(_(self.meta.get_label(field))))
+		if self.get(field) in (None, ""):
+			self.set(field, default)
+		elif cint(self.get(field)) < 1:
+			frappe.throw(_("{0} must be at least one day.").format(_(self.meta.get_label(field))))

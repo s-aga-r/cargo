@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import cint, now
+from frappe.utils import add_days, cint, now, now_datetime
 
 from cargo.cargo.doctype.dns_zone.dns_zone import DEFAULT_TTL
 from cargo.cloud_mail.cluster import dns as cluster_dns
@@ -510,3 +510,34 @@ def _run_isolated(name: str, action, label: str) -> None:
 		return
 	if not frappe.in_test:
 		frappe.db.commit()
+
+
+def purge_disabled_domains() -> None:
+	"""Daily: delete the domains of archived sites once their hold has run out.
+
+	Only an archived site's domains go: a domain its owner disabled on a living site is theirs
+	to bring back. A domain nobody owns is Central's and is never purged on a clock."""
+
+	days = cint(frappe.get_cached_doc("Mail Settings").disabled_domain_retention_days)
+	cutoff = add_days(now_datetime(), -days)
+	domain = frappe.qb.DocType("Mail Domain")
+	site = frappe.qb.DocType("Mail Site")
+	expired = (
+		frappe.qb.from_(domain)
+		.join(site)
+		.on(domain.site == site.name)
+		.select(domain.name)
+		.where((domain.enabled == 0) & (domain.disabled_at < cutoff) & (site.status == "Archived"))
+		.run(pluck=True)
+	)
+	for name in expired:
+		_run_isolated(name, lambda: purge_domain(name), "Purge")
+
+
+def purge_domain(name: str) -> None:
+	"""The domain and everything on it, each document destroying its own Stalwart object."""
+
+	for doctype in ("Mail Account", "Mail Group", "Mailing List"):
+		for doc_name in frappe.get_all(doctype, {"domain": name}, pluck="name"):
+			frappe.delete_doc(doctype, doc_name, ignore_permissions=True)
+	frappe.delete_doc("Mail Domain", name, ignore_permissions=True)

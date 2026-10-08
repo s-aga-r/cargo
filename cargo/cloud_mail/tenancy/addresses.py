@@ -107,6 +107,14 @@ def assert_domain_available(domain_name: str, site: str) -> None:
 	"""Free for this site to add: unclaimed, and not a zone of the mail infrastructure itself."""
 
 	if frappe.db.exists("Mail Domain", domain_name):
+		if claimable(domain_name):
+			# An archived site's disabled domain, held for its retention: the caller has proved
+			# control of it, so the old holder's copy goes and the name is free.
+			from cargo.cloud_mail.doctype.mail_domain.mail_domain import purge_domain
+
+			purge_domain(domain_name)
+			assert_domain_not_reserved(domain_name)
+			return
 		if frappe.db.get_value("Mail Domain", domain_name, "site") == site:
 			frappe.throw(
 				_("Domain {0} is already added to this site.").format(domain_name),
@@ -116,6 +124,13 @@ def assert_domain_available(domain_name: str, site: str) -> None:
 		# site's business.
 		frappe.throw(_("Domain {0} is not available.").format(domain_name), frappe.DuplicateEntryError)
 	assert_domain_not_reserved(domain_name)
+
+
+def claimable(domain_name: str) -> bool:
+	"""A disabled domain whose site is archived may be taken over by a site that proves control."""
+
+	enabled, owner = frappe.db.get_value("Mail Domain", domain_name, ["enabled", "site"])
+	return not enabled and bool(owner) and frappe.db.get_value("Mail Site", owner, "status") == "Archived"
 
 
 def assert_domain_not_reserved(domain_name: str) -> None:
