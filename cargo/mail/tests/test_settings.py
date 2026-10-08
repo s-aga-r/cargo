@@ -1,0 +1,66 @@
+import frappe
+from frappe.tests import IntegrationTestCase
+
+from cargo.mail.utils import get_config
+
+
+class TestMailSettings(IntegrationTestCase):
+	def setUp(self) -> None:
+		self.settings = frappe.get_single("Mail Settings")
+		clear_config_cache()
+
+	def test_public_url_is_normalised(self) -> None:
+		self.settings.public_url = "https://cloud.example.test/ "
+		self.settings.save()
+
+		self.assertEqual(self.settings.public_url, "https://cloud.example.test")
+
+	def test_config_prefers_settings_over_site_config(self) -> None:
+		self.settings.public_url = "https://settings.test"
+		self.settings.save()
+		clear_config_cache()
+
+		with self.patch_site_config(public_url="https://conf.test"):
+			self.assertEqual(get_config("public_url"), "https://settings.test")
+
+	def test_config_falls_back_to_site_config(self) -> None:
+		self.settings.public_url = ""
+		self.settings.save()
+
+		with self.patch_site_config(public_url="https://conf.test"):
+			self.assertEqual(get_config("public_url"), "https://conf.test")
+			self.assertEqual(
+				get_config(("public_url", "default_dns_ttl")),
+				("https://conf.test", self.settings.default_dns_ttl),
+			)
+
+	def test_unknown_config_key_throws(self) -> None:
+		self.assertRaises(frappe.ValidationError, get_config, "root_domain_name")
+
+	def test_spam_rules_pin_is_backfilled_for_existing_sites(self) -> None:
+		from suite_cloud.patches.v1_0 import pin_spam_filter_rules_version as patch
+
+		default = frappe.get_meta(patch.SETTINGS).get_field(patch.FIELD).default
+		self.assertTrue(default)
+
+		frappe.db.set_single_value(patch.SETTINGS, patch.FIELD, "")  # a site saved before the field
+		patch.execute()
+		self.assertEqual(frappe.db.get_single_value(patch.SETTINGS, patch.FIELD), default)
+
+		frappe.db.set_single_value(patch.SETTINGS, patch.FIELD, "v3.0.0")
+		patch.execute()
+		self.assertEqual(frappe.db.get_single_value(patch.SETTINGS, patch.FIELD), "v3.0.0")
+
+	def patch_site_config(self, **values):
+		from unittest.mock import patch
+
+		clear_config_cache()
+		return patch.dict(frappe.local.conf, {"suite_cloud": values})
+
+
+def clear_config_cache() -> None:
+	"""get_config is request-cached; tests change settings mid-"request"."""
+
+	cache = getattr(frappe.local, "request_cache", None)
+	if cache is not None:
+		cache.clear()
