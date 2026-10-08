@@ -194,3 +194,43 @@ The engine persists the `args` and `kwargs` of every flow and task (`Data` field
 `test_provisioning.py` drives a flow under `foreground_enqueue_workflow` with `run_over_ssh` replaced by a fake that echoes its environment and exits non-zero, then asserts that no spelling of any secret appears in any Press Workflow, Press Workflow Task, Press Workflow Object or Error Log row, or in `setup_log`.
 
 The one secret that leaves Cargo's control is the send-only SMTP password, which Pilot writes into the site's `site_config.json` on the tenant machine, readable by the bench user. That is accepted: it is the credential of that site alone, and revocation is the Stalwart role lock.
+
+## State and recovery
+
+Postgres is not the only state that cannot be rebuilt. There are four holders.
+
+| State holder | Holds | Loss costs | Protection |
+|---|---|---|---|
+| Cargo's MariaDB and the site's `encryption_key` | Stalwart admin, API and relay credentials; DNS provider secrets; Mail Site ownership, limits and verification tokens; the Mail Domain, Account, Group and List mirror with its `stalwart_id`s; and already today Garage's `rpc_secret` and `admin_token`, bucket credentials and Machine SSH keys | Ownership cannot be recovered from Stalwart (decision 7), and `Adopt Directory` refuses a cluster that serves more than one site | A daily job runs Frappe's `BackupGenerator` and uploads the dump and `*-site_config_backup.json` to a `cargo-backups` bucket on the region's Garage. The bucket key and the `encryption_key` are held outside the region, by Central or in the operator vault; without them the backup cannot be fetched or read. |
+| Postgres | Directory objects, the mailbox index, the queue, applied configuration, ACME certificates, DKIM private keys | Mail data; every DKIM key regenerates | Nightly `pg_dump` to a service-owned bucket, 30 days, owned by track B |
+| Garage blobs | Every message body; the Postgres and Cargo backups (decision 13) | One Garage loss takes bodies and backups together | `replication_factor`, until the out-of-region copy |
+| Node-local `/etc/stalwart` | `config.json`, the environment file, the plan marker | Nothing; rebuildable | `bootstrap.sh` keeps the "already been initialized" branch, which with Postgres is the normal re-bootstrap path |
+
+Restore-point rule: Postgres older than the blobs is safe, it leaves orphan blobs; blobs older than Postgres loses bodies. Two runbooks go in `docs/mail.md`:
+
+- **Cargo's database lost, Postgres intact.** Restore the dump and key. Regain root on the nodes through Atlas. Set a new admin password with the recovery-stage `admin_account_operation`, run `ensure_api_key`, `forget_sessions` and `reconcile_directory`, re-own `orphans_on_stalwart` from Central's registry, rotate the DNS and Garage credentials.
+- **Postgres lost, Cargo's database intact.** Full re-bootstrap, then a `recreate` pass that pushes every mirrored object and rewrites its `stalwart_id`; the normal `sync` updates by id and cannot. Every domain is marked unverified so owners republish DKIM values under the unchanged selectors.
+
+## Health and telemetry
+
+`cargo/object_storage/health/` is split into `cargo/health/` (`Finding`, `Reading`, an abstract `LiveHealth` with `check`, `record`, `dump` and `prune_history` parameterised by service and settings; `shipping.py` with `get_metrics_info`, `parse_metrics(prefix=)`, `send` and a `Shipper`) and a Garage remainder. The existing tests move unchanged. Postgres and Valkey are built on the same split.
+
+| Phase | Mail health |
+|---|---|
+| 3a | `MailHealth(LiveHealth)` every minute on Active clusters: `GET https://<node>/healthz/ready` per Active or Draining node, and one `cluster_nodes.get_all()`. Management API unreachable or no node answering is Critical, and the only finding. A node not answering, or a lease not `active`, past `node_offline_seconds` is Degraded. A default certificate within `certificate_warn_days` of expiry is Degraded. A non-empty cached `drift_report` or `directory_report` is Degraded. Failed is Critical; a cluster that has not served is Unknown. Settings in a `Mail Health Settings` Single. |
+| 4 | Inherits the region's Object Storage Cluster, Postgres and Valkey verdicts: Garage or Postgres Critical is Critical; Valkey Critical is Degraded when the coordinator is in use. Stalwart's Prometheus exporter is enabled in the plan with a `metrics_token`; `ship_metrics` scrapes each node over the mesh every five minutes, prefix `stalwart_`, labels cluster, region, machine and role. Logs stay on the node (the `Log` tracer, the journal at `warn`, a 14-day prune); datum speaks no OTLP and no Cargo machine ships logs today, so shipping is deferred for all services together. |
+| 6 | Auto-drain at `consecutive_failures >= 3` with `drained_by = "Health"`, never the last healthy node; auto-restore only of Health drains, after three consecutive successes; operator drains stay. Failover latency is the ingress record's TTL plus the threshold. Gateways get the same fields. |
+
+A Critical verdict reaches only Error Log today, for mail as for Garage; nothing pages anyone for a region without mail. The smallest fix is a `kind: "health"` delivery to Central through the same webhook helper. It is deferred, and listed first among the things to pick up after the out-of-region copy.
+
+## Operating the cluster
+
+**A dead node.** `sync_pending_machines` watches Pending machines only, so death is detected by the health poll: a lease not active for `node_offline_seconds`, or the Machine Broken or Terminated. Then `sync_node_records(include_ingress=False)`, `set_status("Failed")` so `sending_ips` drops it, `sync_spf_record`, and a best-effort `forget_node`. A Terminated machine's IPv4 goes back to Atlas and can be reissued to someone else, so the SPF resync is a correctness requirement, not housekeeping. The cluster stays Active while one node remains in the ingress record. Cargo never replaces a machine unattended, for the reason object storage gives: the operator releases the Machine, requests a new one for the same node record (hostname, number and DNS names stay), waits for reverse DNS, and provisions (`configure.sh` when the cluster is Active, `bootstrap.sh` when it is Pending or Failed). `forget_node` runs before the join so the lease is fresh. Whether Stalwart keeps a stale `ClusterNode` of the same hostname is settled on the first real region.
+
+**The Cargo host down.** Keeps working: mail flow, JMAP and IMAP, ACME renewal, the cluster domain's MX, DKIM and DMARC. Stops: the directory API (the Suite app shows its unavailable error), lifecycle calls, customer DNS changes and verification, node, ingress and SPF records, report fetching, health, spawn. On return the engine re-enqueues Queued and Running flows itself; the operator runs `check_drift` and `reconcile_directory` and waits for one Healthy pass.
+
+**Upgrade and rollback.** `install.sh` installs `/usr/local/bin/stalwart-<version>` behind a `stalwart` symlink and keeps two versions; `upgrade.sh` flips and restarts; `rollback.sh` flips back. `upgrade_nodes` becomes one flow per cluster that serialises nodes: drain, upgrade, wait for the lease, restore, soak for `soak_minutes` (Mail Settings, default ten) with health Healthy, then the next. Any failure stops the flow and leaves the node Draining. It refuses to start while another upgrade or drain flow runs. A version step is rolled one node at a time only when the release notes allow mixed versions on one data store; otherwise stop all, upgrade all, start the bootstrap node first. `force_fail` takes effect at the next task boundary; a running SSH session ends at its timeout.
+
+**Valkey loss.** Phase 6 stops Valkey on a live three-node cluster, records what Stalwart does with inbound and outbound mail, restarts it, and confirms leases reappear without a Stalwart restart. What is observed is written into `docs/mail.md`. A node joining during the outage is expected to fail after the bootstrap deadline.
+
+**Garage Critical.** Blob writes fail, so inbound mail is deferred by senders and body reads fail. Mail health inherits Critical; the runbook points at `docs/health.md`.
