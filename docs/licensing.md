@@ -9,7 +9,7 @@ Cargo is MIT. Code that arrives from a repository under another licence is recor
 | Origin | `frappe/suite_cloud`, AGPL-3.0 |
 | Pinned commit | `353a8ede7ac8fb3273577ddc58b1451390cdb038` (`feat: adopt groups with receiving already disabled as such`) |
 | Copyright holder | Frappe Technologies Pvt Ltd, the author named in its `pyproject.toml` |
-| Copied into | `cargo/mail/`, `cargo/dns/`, `cargo/cargo/doctype/dns_zone/`, `cargo/cargo/doctype/dns_record/` |
+| Copied into | `cargo/cloud_mail/`, `cargo/dns/`, `cargo/cargo/doctype/dns_zone/`, `cargo/cargo/doctype/dns_record/` |
 | Relicensed as | MIT, with Cargo |
 | Approved by | Pending |
 | Approved on | Pending |

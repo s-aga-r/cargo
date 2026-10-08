@@ -3,4 +3,4 @@ Object Storage
 Workflow Engine
 Image Builder
 Telemetry
-Mail
+Cloud Mail

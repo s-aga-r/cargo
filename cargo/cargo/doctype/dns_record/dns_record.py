@@ -11,7 +11,7 @@ from frappe.utils import cint, now
 from cargo.cargo.doctype.dns_zone.dns_zone import get_default_zone
 from cargo.dns import get_dns_provider
 from cargo.dns.resolver import verify_dns_record
-from cargo.mail.utils import enqueue_job, get_config, user_context
+from cargo.cloud_mail.utils import enqueue_job, get_config, user_context
 
 
 class DNSRecord(Document):
