@@ -7,7 +7,6 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils import now
-from suite_cloud.provisioning.ssh import generate_keypair, validate_ssh_user_field
 
 from cargo.cargo.doctype.dns_zone.dns_zone import get_default_zone
 from cargo.mail.cluster import bootstrap, dns, egress, naming, plan, reconcile
@@ -64,10 +63,6 @@ class StalwartCluster(Document):
 		relay_username: DF.Data | None
 		search_store: DF.Link | None
 		single_node: DF.Check
-		ssh_port: DF.Int
-		ssh_private_key: DF.Password | None
-		ssh_public_key: DF.Code | None
-		ssh_user: DF.Data
 		stalwart_version: DF.Data | None
 		title: DF.Data
 		status: DF.Literal["Pending", "Bootstrapping", "Active", "Failed", "Disabled"]
@@ -83,11 +78,8 @@ class StalwartCluster(Document):
 		self.relay_username = self.relay_username or "relay"
 		if not self.relay_password:
 			self.relay_password = frappe.generate_hash(length=32)
-		if not self.ssh_public_key:
-			self.ssh_private_key, self.ssh_public_key = generate_keypair(f"suite-cloud-{self.hostname}")
 
 	def validate(self) -> None:
-		validate_ssh_user_field(self)
 		self.validate_names()
 		self.apply_defaults()
 		self.validate_stores()
@@ -246,14 +238,14 @@ class StalwartCluster(Document):
 
 	@frappe.whitelist()
 	def preview_plan(self) -> str:
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		return plan.redacted(plan.cluster_plan(self))
 
 	@frappe.whitelist()
 	def sync_config(self) -> dict:
 		"""Pushes the generated configuration to the running cluster and reloads it."""
 
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		if self.status != "Active":
 			frappe.throw(_("Only an active cluster can be synced; provision the first node instead."))
 		return self.push_config()
@@ -270,7 +262,7 @@ class StalwartCluster(Document):
 
 	@frappe.whitelist()
 	def check_drift(self) -> dict:
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		report = plan.drift_report(self)
 		self.db_set("drift_report", frappe.as_json(report), update_modified=False)
 		return report
@@ -279,19 +271,19 @@ class StalwartCluster(Document):
 	def reconcile_directory(self) -> dict:
 		"""Reports domains/accounts/lists that differ between Suite Cloud and the cluster; never mutates."""
 
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		return reconcile.directory_report(self)
 
 	@frappe.whitelist()
 	def finish_bootstrap(self) -> bool:
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		return bootstrap.finish_bootstrap(self)
 
 	@frappe.whitelist()
 	def rotate_api_key(self) -> None:
 		"""Mints a fresh management key with the admin credentials and forgets the old one."""
 
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		client = self.get_admin_client()
 		old = client.api_keys.find_local(description=plan.API_KEY_DESCRIPTION)
 		_, secret = client.api_keys.create_secret(
@@ -311,7 +303,7 @@ class StalwartCluster(Document):
 		Stalwart publishes the new records itself; without one they must be published by hand.
 		"""
 
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		client = self.get_client()
 		domain = client.domains.find_by_name(self.default_domain)
 		if not domain:
@@ -324,13 +316,6 @@ class StalwartCluster(Document):
 	def show_admin_password(self) -> str:
 		frappe.only_for("Administrator")
 		return self.get_password("admin_password")
-
-	@frappe.whitelist()
-	def upgrade_nodes(self) -> list[str]:
-		"""Upgrades every active node one after the other to the cluster's Stalwart version."""
-
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
-		return [bootstrap.upgrade_node(node).name for node in self.get_nodes(("Active",))]
 
 
 def check_all_clusters() -> None:

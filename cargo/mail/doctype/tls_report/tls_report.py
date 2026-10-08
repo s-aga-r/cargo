@@ -8,6 +8,9 @@ hosts negotiated TLS the way the domain's MTA-STS or DANE policy asks for, and w
 failed. The domain's TLS-RPT record sends the reports to postmaster@, where the cluster keeps them.
 """
 
+from __future__ import annotations
+
+
 from uuid import uuid7
 
 import frappe

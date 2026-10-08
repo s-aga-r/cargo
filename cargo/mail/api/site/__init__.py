@@ -22,7 +22,7 @@ from cargo.mail.stalwart.errors import StalwartRejectedError, StalwartUnauthoriz
 from cargo.mail.utils import get_config
 
 OWNED_DOCTYPES = {"Mail Domain", "Mail Account", "Mail Group", "Mailing List"}
-MANAGER_ROLES = ("System Manager", "Suite Cloud Manager")
+MANAGER_ROLES = ("System Manager",)
 RATE_LIMIT = 300  # requests per site per minute
 ALIAS_CAP = 100  # aliases on one object; more than that is a list, not an account
 MEMBERSHIP_CAP = 500  # groups or members named in one request

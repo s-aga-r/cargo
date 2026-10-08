@@ -198,7 +198,7 @@ class MailAccount(QuotaHolder, Document):
 	def reset_password(self, password: str | None = None) -> str:
 		"""Sets a new password on the cluster and returns it; a blank one is generated."""
 
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		password = password or generate_password()
 		self.set_password(password)
 		return password
@@ -215,24 +215,24 @@ class MailAccount(QuotaHolder, Document):
 
 	@frappe.whitelist()
 	def rotate_app_password(self) -> str:
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		return self.mint_credential("app_password")
 
 	@frappe.whitelist()
 	def show_app_password(self) -> str:
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		return self.get_password("app_password")
 
 	@frappe.whitelist()
 	def rotate_api_key(self) -> str:
 		"""The API key exists only on demand; the first rotation creates it."""
 
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		return self.mint_credential("api_key")
 
 	@frappe.whitelist()
 	def show_api_key(self) -> str:
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		return self.get_password("api_key")
 
 	def mint_credential(self, field: str) -> str:

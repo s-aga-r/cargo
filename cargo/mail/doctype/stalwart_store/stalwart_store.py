@@ -217,7 +217,7 @@ class StalwartStore(Document):
 
 	def _config_rediscluster(self) -> dict:
 		return {
-			"urls": {u: True for u in lines(self.urls)},
+			"urls": dict.fromkeys(lines(self.urls), True),
 			"authUsername": self.auth_username or None,
 			"authSecret": secret(self, "auth_secret"),
 			"readFromReplicas": bool(self.read_from_replicas),
@@ -227,7 +227,7 @@ class StalwartStore(Document):
 
 	def _config_redissentinel(self) -> dict:
 		return {
-			"urls": {u: True for u in lines(self.urls)},
+			"urls": dict.fromkeys(lines(self.urls), True),
 			"serviceName": self.service_name or "mymaster",
 			"authUsername": self.auth_username or None,
 			"authSecret": secret(self, "auth_secret"),

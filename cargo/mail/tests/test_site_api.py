@@ -2,8 +2,8 @@ from unittest.mock import patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from cargo.mail.api import central as fc
 
+from cargo.mail.api import central as fc
 from cargo.mail.api.mail import accounts, domains, groups, mailing_lists, meta
 from cargo.mail.api.site import (
 	SiteAddressError,

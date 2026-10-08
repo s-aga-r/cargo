@@ -1,5 +1,5 @@
 {
- "app": "suite_cloud",
+ "app": "cargo",
  "creation": "2026-09-01 12:00:00.000000",
  "docstatus": 0,
  "doctype": "Workspace Sidebar",
@@ -179,18 +179,6 @@
    "keep_closed": 0,
    "label": "DNS Zones",
    "link_to": "DNS Zone",
-   "link_type": "DocType",
-   "show_arrow": 0,
-   "type": "Link"
-  },
-  {
-   "child": 0,
-   "collapsible": 1,
-   "icon": "square-play",
-   "indent": 0,
-   "keep_closed": 0,
-   "label": "Server Jobs",
-   "link_to": "Server Job",
    "link_type": "DocType",
    "show_arrow": 0,
    "type": "Link"

@@ -34,7 +34,7 @@ SPAM_RULES_URL = (
 def as_set(values) -> dict:
 	"""Stalwart encodes Set<T> as ``{value: true}``; an empty set is ``{}``."""
 
-	return {value: True for value in values}
+	return dict.fromkeys(values, True)
 
 
 def as_list(items) -> dict:

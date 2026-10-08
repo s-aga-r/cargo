@@ -1,32 +1,21 @@
-"""Node lifecycle: provisioning, bootstrap completion, health, draining and upgrades."""
+"""Node lifecycle: bootstrap completion, health, draining and upgrades."""
 
-import re
 from typing import TYPE_CHECKING
 
 import frappe
 from frappe import _
 from frappe.utils import add_to_date, get_datetime, now
 
-from cargo.cargo.doctype.server_job.server_job import create_server_job
 from cargo.mail.cluster import dns, plan
 from cargo.mail.stalwart import forget_sessions, get_client, has_credentials
 from cargo.mail.stalwart.credentials import Credential
 from cargo.mail.stalwart.errors import StalwartError, StalwartUnauthorizedError
-from cargo.mail.utils import get_config, log_error, log_exception
+from cargo.mail.utils import log_error, log_exception
 
 if TYPE_CHECKING:
 	from frappe.model.document import Document
 
 BOOTSTRAP_DEADLINE_MINUTES = 45
-NODE_VARIABLES_BUILDER = "cargo.mail.cluster.bootstrap.build_node_variables"
-SECRET_VARIABLES = (
-	"admin_password",
-	"env_bootstrap",
-	"env_recovery",
-	"config_json",
-	"bootstrap_ndjson",
-	"cluster_ndjson",
-)
 
 
 # --- provisioning ---------------------------------------------------------------------------
@@ -38,130 +27,11 @@ def serves_clients(node: Document) -> bool:
 	return (node.role or "full") != "outbound"
 
 
-def provision_node(node: Document) -> Document:
-	cluster = node.get_cluster()
-	if (
-		cluster.status == "Failed"
-		or (cluster.status == "Pending" and not _has_other_bootstrap_node(cluster, node))
-		or _holds_the_only_data_store(cluster, node)
-	):
-		if not serves_clients(node):
-			frappe.throw(_("The first node must serve clients; pick the full or frontend role."))
-		playbook = "bootstrap-cluster.yml"
-		node.db_set("is_bootstrap_node", 1, update_modified=False)
-		cluster.db_set({"status": "Bootstrapping", "bootstrap_node": node.name}, update_modified=False)
-		cluster.bump_config_version(plan.cluster_plan(cluster))
-	elif cluster.status == "Bootstrapping" and node.is_bootstrap_node:
-		playbook = "bootstrap-cluster.yml"
-	elif cluster.status == "Active":
-		playbook = "configure-node.yml"
-	else:
-		frappe.throw(_("The cluster is still bootstrapping; provision more nodes once it is active."))
-
-	node.set_status("Provisioning")
-	return create_server_job(
-		node,
-		playbook,
-		title=f"Provision {node.hostname}",
-		context={"node": node.name},
-		variables_builder=NODE_VARIABLES_BUILDER,
-		callback="after_provision",
-	)
-
-
-def _has_other_bootstrap_node(cluster: Document, node: Document) -> bool:
-	return bool(cluster.bootstrap_node and cluster.bootstrap_node != node.name)
-
-
-def _holds_the_only_data_store(cluster: Document, node: Document) -> bool:
-	"""A single-node cluster's embedded store lives on its node, so provisioning that node again
-	may start from an empty store. Joining (configure-node.yml) would leave it unset; bootstrapping
-	again sets it up and skips whatever is already in place."""
-
-	return bool(cluster.single_node) and cluster.status == "Active" and cluster.bootstrap_node == node.name
-
-
-def upgrade_node(node: Document) -> Document:
-	if not node.enabled:
-		frappe.throw(_("Enable the node first."))
-	if node.status == "Active":
-		drain_node(node)
-	return create_server_job(
-		node,
-		"upgrade-stalwart.yml",
-		title=f"Upgrade {node.hostname} to {node.get_cluster().stalwart_version}",
-		context={"node": node.name},
-		variables_builder=NODE_VARIABLES_BUILDER,
-		callback="after_upgrade",
-	)
-
-
-def run_commands(server: Document, commands: list[str], title: str) -> Document:
-	return create_server_job(
-		server,
-		"run-commands.yml",
-		title=title,
-		context={"commands": commands},
-		variables_builder="cargo.mail.cluster.bootstrap.build_command_variables",
-	)
-
-
-# The only ad-hoc commands a job may run on a server: opening a firewall port. The job's context
-# is stored on a row operators can write, so the shape is checked here, not trusted.
-ALLOWED_COMMANDS = (re.compile(r"^ufw allow \d{1,5}/tcp$"),)
-
-
-def build_command_variables(context: dict) -> dict:
-	commands = [str(c) for c in context.get("commands") or []]
-	for command in commands:
-		if not any(pattern.match(command) for pattern in ALLOWED_COMMANDS):
-			frappe.throw(_("Command {0} is not one a Server Job may run.").format(command))
-	return {"commands": commands}
-
-
-def build_node_variables(context: dict) -> dict:
-	"""Everything the node playbooks need; secrets are listed so the job snapshot redacts them."""
-
-	node = frappe.get_doc("Stalwart Node", context["node"])
-	cluster = node.get_cluster()
-	variables = {
-		"node_hostname": node.hostname,
-		"cluster_hostname": cluster.hostname,
-		"ssh_port": node.ssh_port or cluster.ssh_port,
-		"stalwart_version": cluster.stalwart_version or get_config("stalwart_version"),
-		"stalwart_url_template": get_config("stalwart_download_url_template"),
-		"stalwart_cli_version": get_config("stalwart_cli_version"),
-		"stalwart_cli_url_template": get_config("stalwart_cli_download_url_template"),
-		"systemd_unit": plan.systemd_unit(),
-		"firewall_ports": list(plan.FIREWALL_PORTS),
-		"wait_ports": [25, 443] if serves_clients(node) else [],
-		"recovery_port": plan.BOOTSTRAP_PORT,
-		"admin_user": cluster.admin_username,
-		"admin_password": cluster.get_password("admin_password"),
-		"config_version": cluster.config_version or 0,
-		"plan_marker": plan.marker(recovery_plan := plan.recovery_plan(cluster)),
-		"env_normal": plan.render_env(plan.node_env(node, "normal")),
-		"env_bootstrap": plan.render_env(plan.node_env(node, "bootstrap")),
-		"env_recovery": plan.render_env(plan.node_env(node, "recovery")),
-		"config_json": frappe.as_json(plan.node_config(cluster)),
-		"bootstrap_ndjson": plan.to_ndjson(bootstrap_plan := plan.bootstrap_plan(cluster)),
-		"defaults_ndjson": plan.to_ndjson(plan.defaults_plan()),
-		"cluster_ndjson": plan.to_ndjson(recovery_plan),
-		"__secret_keys__": list(SECRET_VARIABLES),
-		"__secret_values__": [
-			cluster.get_password("admin_password"),
-			*plan.secret_strings(bootstrap_plan),
-			*plan.secret_strings(recovery_plan),
-		],
-	}
-	return variables
-
-
 # --- callbacks --------------------------------------------------------------------------------
 
 
-def after_provision(node: Document, job: Document) -> None:
-	"""The playbook finished: the node is installed and answering locally."""
+def after_provision(node: Document) -> None:
+	"""The node is installed and answering locally."""
 
 	cluster = node.get_cluster()
 	if node.is_bootstrap_node and cluster.status == "Failed" and cluster.bootstrap_node == node.name:
@@ -183,7 +53,7 @@ def after_provision(node: Document, job: Document) -> None:
 	check_node(node)
 
 
-def after_upgrade(node: Document, job: Document) -> None:
+def after_upgrade(node: Document) -> None:
 	node.db_set(
 		{"installed_version": node.get_cluster().stalwart_version, "provisioned_at": now()},
 		update_modified=False,

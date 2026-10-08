@@ -47,7 +47,7 @@ class TestDnsResolver(UnitTestCase):
 
 
 def everywhere(answer) -> dict:
-	return {nameserver: answer for nameserver in resolver.NAMESERVERS}
+	return dict.fromkeys(resolver.NAMESERVERS, answer)
 
 
 @contextmanager

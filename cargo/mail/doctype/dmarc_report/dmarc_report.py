@@ -3,6 +3,9 @@
 
 """DMARC aggregate reports, copied from the clusters (see ``cargo.mail.reports``)."""
 
+from __future__ import annotations
+
+
 import json
 from uuid import uuid7
 

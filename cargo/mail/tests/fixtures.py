@@ -65,10 +65,6 @@ def remove_cluster(name: str) -> None:
 		return
 
 	nodes = frappe.get_all("Stalwart Node", {"cluster": name}, pluck="name")
-	jobs = frappe.get_all("Server Job", {"server": ["in", nodes]}, pluck="name") if nodes else []
-	if jobs:
-		frappe.db.delete("Server Job Task", {"parent": ["in", jobs]})
-		frappe.db.delete("Server Job", {"name": ["in", jobs]})
 	frappe.db.delete("DNS Record", {"managed_by": ["in", [*nodes, name]]})
 	for node in nodes:
 		frappe.delete_doc("Stalwart Node", node, force=True, ignore_permissions=True, ignore_on_trash=True)
@@ -78,7 +74,6 @@ def remove_cluster(name: str) -> None:
 def make_node(cluster, ipv4: str = "203.0.113.10", **fields):
 	"""Nodes name themselves n1, n2, ... in creation order."""
 
-	fields.setdefault("ssh_host_keys", f"{ipv4} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeHostKeyForTests")
 	node = frappe.get_doc(
 		{"doctype": "Stalwart Node", "cluster": cluster.name, "ipv4_address": ipv4, **fields}
 	)

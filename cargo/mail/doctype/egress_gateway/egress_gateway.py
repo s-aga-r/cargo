@@ -4,9 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import cint, now
-from suite_cloud.provisioning.ansible import ping
-from suite_cloud.provisioning.ssh import SSHTarget, scan_host_keys, validate_ssh_user_field
+from frappe.utils import now
 
 from cargo.mail.cluster import dns, egress, naming, plan
 from cargo.mail.doctype.stalwart_node.stalwart_node import validate_ip
@@ -38,9 +36,6 @@ class EgressGateway(Document):
 		last_config_sync_at: DF.Datetime | None
 		last_error: DF.SmallText | None
 		provisioned_at: DF.Datetime | None
-		ssh_port: DF.Int
-		ssh_user: DF.Data | None
-		ssh_verified: DF.Check
 		stalwart_version: DF.Data | None
 		location: DF.Data | None
 		title: DF.Data | None
@@ -62,7 +57,6 @@ class EgressGateway(Document):
 			self.data_store = self.create_local_store().name
 
 	def validate(self) -> None:
-		validate_ssh_user_field(self)
 		cluster = self.get_cluster()
 		self.title = (self.title or "").strip() or self.hostname
 		self.hostname = (self.hostname or "").strip().lower().rstrip(".")
@@ -72,15 +66,6 @@ class EgressGateway(Document):
 
 		self.base_url = f"https://{self.hostname}"
 		self.ipv4_address = validate_ip(self.ipv4_address, 4)
-		if not self.is_new() and (
-			self.has_value_changed("ipv4_address") or self.has_value_changed("ssh_port")
-		):
-			self.ssh_verified = 0
-			self.ssh_host_keys = None  # a different box answers there; its key is unknown again
-		elif self.has_value_changed("ipv4_address"):
-			self.ssh_verified = 0
-		self.ssh_user = self.ssh_user or cluster.ssh_user
-		self.ssh_port = self.ssh_port or cluster.ssh_port
 		self.stalwart_version = validate_version(
 			self.stalwart_version or cluster.stalwart_version or get_config("stalwart_version"),
 			_("Stalwart Version"),
@@ -132,16 +117,6 @@ class EgressGateway(Document):
 		)
 		return [frappe.get_doc("Egress IP Pool", name) for name in sorted(set(names))]
 
-	def ssh_target(self) -> SSHTarget:
-		cluster = self.get_cluster()
-		return SSHTarget(
-			host=self.ipv4_address,
-			user=self.ssh_user or cluster.ssh_user,
-			port=cint(self.ssh_port or cluster.ssh_port),
-			private_key=cluster.get_password("ssh_private_key"),
-			host_keys=self.ssh_host_keys,
-		)
-
 	def set_status(self, status: str, error: str | None = None) -> None:
 		serving_before = self.status == "Active"
 		values = {"status": status}
@@ -175,44 +150,8 @@ class EgressGateway(Document):
 	# --- actions --------------------------------------------------------------------
 
 	@frappe.whitelist()
-	def verify_ssh(self) -> bool:
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
-		if not self.ssh_host_keys:
-			# First contact: the operator has just put the cluster's key on this box, so the key it
-			# presents now is the one every later connection must match.
-			try:
-				self.db_set(
-					"ssh_host_keys",
-					scan_host_keys(self.ipv4_address, cint(self.ssh_port)),
-					update_modified=False,
-				)
-			except Exception as e:
-				self.db_set({"ssh_verified": 0, "last_error": str(e)}, update_modified=False)
-				frappe.msgprint(_("SSH connection failed: {0}").format(e), indicator="red")
-				return False
-		ok, detail = ping(self.ssh_target())
-		self.db_set({"ssh_verified": cint(ok), "last_error": None if ok else detail}, update_modified=False)
-		return ok
-
-	@frappe.whitelist()
-	def reset_ssh_host_keys(self) -> None:
-		"""Forgets the pinned host keys after the server was reinstalled; Verify SSH records the new ones."""
-
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
-		self.db_set({"ssh_host_keys": None, "ssh_verified": 0}, update_modified=False)
-		# The next Verify SSH trusts whatever answers, so record who dropped the pin and when.
-		self.add_comment("Info", _("Reset the SSH host keys."))
-
-	@frappe.whitelist()
-	def provision(self) -> str:
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
-		if not self.ssh_verified:
-			frappe.throw(_("Verify the SSH connection first."))
-		return egress.provision_gateway(self).name
-
-	@frappe.whitelist()
 	def sync_config(self) -> dict:
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		if self.status != "Active":
 			frappe.throw(_("Only an active gateway can be synced."))
 		return self.push_config()
@@ -227,7 +166,7 @@ class EgressGateway(Document):
 
 	@frappe.whitelist()
 	def preview_plan(self) -> str:
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		return plan.redacted(egress.gateway_plan(self))
 
 	@frappe.whitelist()
@@ -237,50 +176,16 @@ class EgressGateway(Document):
 
 	@frappe.whitelist()
 	def check_health(self) -> bool:
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		return egress.check_gateway(self)
-
-	@frappe.whitelist()
-	def upgrade(self) -> str:
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
-		return egress.upgrade_gateway(self).name
 
 	@frappe.whitelist()
 	def replace_dkim_keys(self) -> None:
 		"""Emergency replacement of the gateway domain's keys after a leak, same selectors."""
 
-		frappe.only_for(("System Manager", "Suite Cloud Manager"))
+		frappe.only_for("System Manager")
 		client = self.get_client()
 		domain = client.domains.find_by_name(self.hostname)
 		if not domain:
 			frappe.throw(_("The gateway does not hold its domain {0} yet.").format(self.hostname))
 		client.domains.replace_dkim_keys(domain["id"], dkim_algorithms())
-
-	# --- Server Job callbacks ---------------------------------------------------------
-
-	def after_provision(self, job: Document) -> None:
-		egress.after_gateway_provision(self, job)
-
-	def after_provision_failed(self, job: Document) -> None:
-		self.set_status("Failed", job.error_log)
-
-	def after_upgrade(self, job: Document) -> None:
-		self.db_set("installed_version", self.stalwart_version, update_modified=False)
-		self.set_status("Provisioned")
-		egress.check_gateway(self)
-
-	def after_upgrade_failed(self, job: Document) -> None:
-		self.set_status("Failed", job.error_log)
-
-
-def poll_pending_gateways() -> None:
-	for name in frappe.get_all("Egress Gateway", {"status": "Provisioned"}, pluck="name"):
-		gateway = frappe.get_doc("Egress Gateway", name)
-		try:
-			egress.check_gateway(gateway)
-		except Exception:
-			frappe.db.rollback()
-			log_exception(f"Health check failed for {name}", gateway)
-			continue
-		if not frappe.in_test:
-			frappe.db.commit()

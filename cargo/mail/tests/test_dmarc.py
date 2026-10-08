@@ -3,8 +3,8 @@ from unittest.mock import patch
 
 import frappe
 from frappe.utils import add_days
-from cargo.mail import reports
 
+from cargo.mail import reports
 from cargo.mail.api.mail import dmarc, domains
 from cargo.mail.doctype.dmarc_report import dmarc_report
 from cargo.mail.tenancy import sync

@@ -121,4 +121,4 @@ def group_ids(doc: Document) -> list[str]:
 
 
 def group_ids_payload(doc: Document) -> dict:
-	return {gid: True for gid in group_ids(doc)}
+	return dict.fromkeys(group_ids(doc), True)

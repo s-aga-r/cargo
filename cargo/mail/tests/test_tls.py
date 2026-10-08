@@ -3,8 +3,8 @@ from unittest.mock import patch
 
 import frappe
 from frappe.utils import add_days
-from cargo.mail import reports
 
+from cargo.mail import reports
 from cargo.mail.api.mail import domains, tls
 from cargo.mail.doctype.tls_report.tls_report import TLS_REPORTS
 from cargo.mail.tests.test_site_api import SiteApiTestCase

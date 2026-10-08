@@ -5,13 +5,12 @@
  "engine": "InnoDB",
  "field_order": [
   "general_tab",
-  "suite_cloud_section",
+  "general_section",
   "public_url",
   "column_break_general",
   "site_service_user",
   "skip_domain_verification",
   "jobs_section",
-  "server_job_timeout",
   "column_break_jobs",
   "dmarc_report_retention_days",
   "tls_report_retention_days",
@@ -41,9 +40,9 @@
    "label": "General"
   },
   {
-   "fieldname": "suite_cloud_section",
+   "fieldname": "general_section",
    "fieldtype": "Section Break",
-   "label": "Suite Cloud"
+   "label": "General"
   },
   {
    "description": "Address Frappe Cloud hands to Suite sites so they can reach this Suite Cloud, e.g. https://cloud.frappemail.com. Leave blank to use this site's own URL.",
@@ -74,15 +73,7 @@
   {
    "fieldname": "jobs_section",
    "fieldtype": "Section Break",
-   "label": "Server Jobs"
-  },
-  {
-   "default": "1800",
-   "description": "How long an install, bootstrap or upgrade job may run before it is marked failed. Bootstrapping the first node includes waiting for a certificate, so keep this generous. 1800 = 30 minutes.",
-   "fieldname": "server_job_timeout",
-   "fieldtype": "Int",
-   "label": "Server Job Timeout (Seconds)",
-   "reqd": 1
+   "label": "Reports"
   },
   {
    "fieldname": "column_break_jobs",

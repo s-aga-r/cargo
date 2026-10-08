@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 
 GATEWAY_ROLE = "egress"
 GATEWAY_DEADLINE_MINUTES = 45
-GATEWAY_VARIABLES_BUILDER = "cargo.mail.cluster.egress.build_gateway_variables"
 SUITE_RULE_PREFIX = "'egress-"
 # Mail between domains of the cluster never leaves it: without this rule first, a relay fallback
 # would send it out through a gateway only to come back through the cluster's own MX.
@@ -177,31 +176,11 @@ def apply_pool_changes(pool: Document) -> None:
 	"""A pool changed: the cluster's routes and every hosting gateway's listeners follow."""
 
 	resync_cluster(pool.get_cluster())
-	before = pool.get_doc_before_save()
-	port_is_new = before is None or before.relay_port != pool.relay_port
-	hosted_before = set(before.gateway_names()) if before else set()
 	for gateway_name in pool.gateway_names():
 		gateway = frappe.get_doc("Egress Gateway", gateway_name)
 		if gateway.status != "Active":
-			continue  # provisioning opens every port of every pool it hosts
+			continue
 		gateway.push_config()
-		if pool.relay_port and (port_is_new or gateway_name not in hosted_before):
-			open_relay_port(gateway, pool.relay_port)
-
-
-def open_relay_port(gateway: Document, port: int) -> None:
-	"""The listener is live once the config is pushed, but ufw on the gateway only learned the
-	ports it had at provisioning; a job opens the new one so mail does not queue silently."""
-
-	from cargo.cargo.doctype.server_job.server_job import create_server_job
-
-	create_server_job(
-		gateway,
-		"run-commands.yml",
-		title=f"Open relay port {port} on {gateway.name}",
-		context={"commands": [f"ufw allow {int(port)}/tcp"]},
-		variables_builder="cargo.mail.cluster.bootstrap.build_command_variables",
-	)
 
 
 def resync_cluster_after_commit(cluster_name: str) -> None:
@@ -433,78 +412,7 @@ def gateway_env(gateway: Document, mode: str = "normal") -> dict[str, str]:
 	return env
 
 
-# --- provisioning ----------------------------------------------------------------------------------
-
-
-def provision_gateway(gateway: Document) -> Document:
-	from cargo.cargo.doctype.server_job.server_job import create_server_job
-
-	gateway.bump_config_version(gateway_plan(gateway))
-	gateway.set_status("Provisioning")
-	return create_server_job(
-		gateway,
-		"bootstrap-cluster.yml",
-		title=f"Provision gateway {gateway.hostname}",
-		context={"gateway": gateway.name},
-		variables_builder=GATEWAY_VARIABLES_BUILDER,
-		callback="after_provision",
-	)
-
-
-def upgrade_gateway(gateway: Document) -> Document:
-	from cargo.cargo.doctype.server_job.server_job import create_server_job
-
-	return create_server_job(
-		gateway,
-		"upgrade-stalwart.yml",
-		title=f"Upgrade gateway {gateway.hostname}",
-		context={"gateway": gateway.name},
-		variables_builder=GATEWAY_VARIABLES_BUILDER,
-		callback="after_upgrade",
-	)
-
-
-def build_gateway_variables(context: dict) -> dict:
-	from cargo.mail.cluster.bootstrap import SECRET_VARIABLES
-	from cargo.mail.utils import get_config
-
-	gateway = frappe.get_doc("Egress Gateway", context["gateway"])
-	relay_ports = sorted({p.relay_port for p in gateway.pools()})
-	return {
-		"node_hostname": gateway.hostname,
-		"cluster_hostname": gateway.get_cluster().hostname,
-		"ssh_port": gateway.ssh_port or gateway.get_cluster().ssh_port,
-		"stalwart_version": gateway.stalwart_version or get_config("stalwart_version"),
-		"stalwart_url_template": get_config("stalwart_download_url_template"),
-		"stalwart_cli_version": get_config("stalwart_cli_version"),
-		"stalwart_cli_url_template": get_config("stalwart_cli_download_url_template"),
-		"systemd_unit": plan.systemd_unit(),
-		"firewall_ports": [443],
-		"relay_ports": relay_ports,
-		"relay_sources": node_addresses(gateway.get_cluster()),
-		"wait_ports": [443, *relay_ports],
-		"recovery_port": plan.BOOTSTRAP_PORT,
-		"admin_user": gateway.admin_username,
-		"admin_password": gateway.get_password("admin_password"),
-		"config_version": gateway.config_version or 0,
-		"plan_marker": plan.marker(recovery_plan := gateway_recovery_plan(gateway)),
-		"env_normal": plan.render_env(gateway_env(gateway, "normal")),
-		"env_bootstrap": plan.render_env(gateway_env(gateway, "bootstrap")),
-		"env_recovery": plan.render_env(gateway_env(gateway, "recovery")),
-		"config_json": frappe.as_json(gateway.get_store("data_store").config),
-		"bootstrap_ndjson": plan.to_ndjson(bootstrap_plan := gateway_bootstrap_plan(gateway)),
-		"defaults_ndjson": plan.to_ndjson(gateway_defaults_plan()),
-		"cluster_ndjson": plan.to_ndjson(recovery_plan),
-		"__secret_keys__": list(SECRET_VARIABLES),
-		"__secret_values__": [
-			gateway.get_password("admin_password"),
-			*plan.secret_strings(bootstrap_plan),
-			*plan.secret_strings(recovery_plan),
-		],
-	}
-
-
-def after_gateway_provision(gateway: Document, job: Document) -> None:
+def after_gateway_provision(gateway: Document) -> None:
 	gateway.db_set(
 		{"status": "Provisioned", "provisioned_at": now(), "installed_version": gateway.stalwart_version},
 		update_modified=False,

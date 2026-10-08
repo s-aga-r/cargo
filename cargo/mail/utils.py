@@ -20,7 +20,6 @@ CONFIG_KEYS = (
 	"spam_filter_rules_version",
 	"acme_directory_url",
 	"acme_contact_email",
-	"server_job_timeout",
 	"sign_with_ed25519",
 	"skip_domain_verification",
 	"dmarc_report_retention_days",
@@ -172,39 +171,6 @@ def user_context(user: str) -> Generator[None]:
 		frappe.session.sid = session_sid
 		frappe.session.data = session_data
 		frappe.local.form_dict = form_dict
-
-
-def reconnect_on_failure(max_retries: int = 3) -> Callable:
-	"""Decorator that reconnects to the database and retries when the connection drops.
-
-	Ansible plays run for minutes and report progress through the ORM, long enough for the
-	server to close an idle connection in between events.
-	"""
-
-	def decorator(func: Callable) -> Callable:
-		@functools.wraps(func)
-		def wrapper(*args, **kwargs):
-			retries = 0
-
-			while True:
-				try:
-					return func(*args, **kwargs)
-
-				except Exception as e:
-					if not is_connection_error(e) or retries >= max_retries:
-						raise type(e)(f"{e!s} | Retries attempted: {retries}/{max_retries}") from e
-
-					retries += 1
-					frappe.db.connect()
-
-		return wrapper
-
-	return decorator
-
-
-def is_connection_error(exception: Exception) -> bool:
-	operational_error = getattr(frappe.db, "OperationalError", ())
-	return frappe.db.is_interface_error(exception) or isinstance(exception, operational_error)
 
 
 def child_rows(doctype: str, parenttype: str, parents: list[str], fields: list[str]) -> dict[str, list]:

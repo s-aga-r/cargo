@@ -201,7 +201,7 @@ class MailingList(Document):
 
 		if not self.stalwart_id:
 			return
-		changes = {**{e: True for e in added or []}, **{e: None for e in removed or []}}
+		changes = {**dict.fromkeys(added or [], True), **dict.fromkeys(removed or [])}
 		keys = list(changes)
 		for start in range(0, len(keys), PATCH_BATCH):
 			batch = keys[start : start + PATCH_BATCH]

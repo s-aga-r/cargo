@@ -5,7 +5,6 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from cargo.mail.cluster import dns, plan
-from cargo.mail.install import SITE_SERVICE_USER
 from cargo.mail.tests.fixtures import (
 	ROOT_DOMAIN,
 	configure_settings,
@@ -16,7 +15,6 @@ from cargo.mail.tests.fixtures import (
 	no_dns_provider,
 	remove_cluster,
 )
-from cargo.mail.utils import user_context
 
 
 class TestStalwartCluster(IntegrationTestCase):
@@ -27,63 +25,6 @@ class TestStalwartCluster(IntegrationTestCase):
 	def tearDown(self) -> None:
 		frappe.flags.do_not_enqueue = False
 
-	def test_connections_pin_the_host_key_recorded_at_first_contact(self) -> None:
-		from suite_cloud.provisioning.ssh import SSHTarget, UnknownHostError, inventory_line, known_hosts_file
-
-		target = SSHTarget("203.0.113.1", "root", 22, "k", host_keys="203.0.113.1 ssh-ed25519 AAAAtest")
-		with known_hosts_file(target) as path:
-			self.assertEqual(open(path).read(), "203.0.113.1 ssh-ed25519 AAAAtest\n")
-			line = inventory_line("n1", target, "/k", path)
-		self.assertIn("StrictHostKeyChecking=yes", line)
-		self.assertIn(f"UserKnownHostsFile={path}", line)
-		self.assertNotIn("/dev/null", line)
-		# Never verified: nothing to check the server against, so no connection at all.
-		with self.assertRaises(UnknownHostError), known_hosts_file(SSHTarget("203.0.113.1", "root", 22, "k")):
-			pass
-
-	def test_reset_host_keys_lets_verify_ssh_record_the_new_ones(self) -> None:
-		cluster = make_cluster()
-		node = make_node(cluster, "203.0.113.1")
-		node.db_set("ssh_verified", 1)
-
-		# A reinstalled server presents new keys; the old pin must go before it can be trusted.
-		node.reset_ssh_host_keys()
-		node.reload()
-		self.assertEqual((node.ssh_host_keys, node.ssh_verified), (None, 0))
-		audit = {"reference_doctype": "Stalwart Node", "reference_name": node.name, "comment_type": "Info"}
-		self.assertEqual(frappe.get_all("Comment", audit, pluck="comment_email"), [frappe.session.user])
-
-		module = "cargo.mail.doctype.stalwart_node.stalwart_node"
-		with (
-			patch(f"{module}.scan_host_keys", return_value="203.0.113.1 ssh-ed25519 AAAAnew"),
-			patch(f"{module}.ping", return_value=(True, "")),
-		):
-			self.assertTrue(node.verify_ssh())
-		node.reload()
-		self.assertEqual((node.ssh_host_keys, node.ssh_verified), ("203.0.113.1 ssh-ed25519 AAAAnew", 1))
-
-	def test_only_managers_can_reset_host_keys(self) -> None:
-		cluster = make_cluster()
-		node = make_node(cluster, "203.0.113.1")
-
-		# Dropping the pin lets the next Verify SSH trust any server, so other users are refused.
-		with user_context(SITE_SERVICE_USER), self.assertRaises(frappe.PermissionError):
-			node.reset_ssh_host_keys()
-		self.assertEqual(frappe.db.get_value("Stalwart Node", node.name, "ssh_host_keys"), node.ssh_host_keys)
-
-	def test_ssh_user_is_a_plain_login_name(self) -> None:
-		cluster = make_cluster()
-		cluster.ssh_user = "root ansible_connection=local"
-		self.assertRaisesRegex(frappe.ValidationError, "plain login name", cluster.save)
-		cluster.reload()
-		cluster.ssh_user = "deploy-user"
-		cluster.save()
-		from suite_cloud.provisioning.ssh import SSHTarget, inventory_line
-
-		self.assertRaises(
-			ValueError, inventory_line, "n1", SSHTarget("203.0.113.1", "root\nx", 22, "k"), "/k", "/kh"
-		)
-
 	def test_cluster_derives_zone_url_and_coordinator(self) -> None:
 		cluster = make_cluster()
 
@@ -91,7 +32,6 @@ class TestStalwartCluster(IntegrationTestCase):
 		self.assertEqual(cluster.base_url, f"https://mail.blr.{ROOT_DOMAIN}")
 		self.assertEqual(cluster.coordinator, "Default")
 		self.assertEqual(cluster.status, "Pending")
-		self.assertTrue(cluster.ssh_public_key.startswith("ssh-ed25519 "))
 		self.assertEqual(len(cluster.get_password("admin_password")), 32)
 		self.assertEqual(
 			cluster.stalwart_version, frappe.db.get_single_value("Mail Settings", "stalwart_version")
@@ -291,22 +231,13 @@ class TestStalwartCluster(IntegrationTestCase):
 		with fake.install():
 			forget_sessions(cluster)
 			clear_request_cache()
-			job = frappe.get_doc(
-				{
-					"doctype": "Server Job",
-					"title": "x",
-					"server_doctype": "Stalwart Node",
-					"server": node.name,
-					"playbook": "run-commands.yml",
-				}
-			)
-			with patch("cargo.cargo.doctype.server_job.server_job.ServerJob.enqueue"):
-				job.insert()
-			bootstrap.provision_node(node)
+			node.db_set("is_bootstrap_node", 1)
+			cluster.db_set({"status": "Bootstrapping", "bootstrap_node": node.name})
+			cluster.bump_config_version(plan.cluster_plan(cluster))
 			node.reload()
 
 			# No registry lease yet: a Redis-coordinated cluster keeps waiting (nothing fails).
-			bootstrap.after_provision(node, job)
+			bootstrap.after_provision(node)
 			self.assertEqual(frappe.db.get_value("Stalwart Cluster", cluster.name, "status"), "Bootstrapping")
 
 			fake.add_cluster_node(node.hostname, node_id=7)
@@ -380,58 +311,12 @@ class TestStalwartCluster(IntegrationTestCase):
 				cluster.get_client().cluster_nodes.find_by_hostname("n1.example.test")["nodeId"], 7
 			)
 
-	def test_reprovisioning_the_node_of_a_single_node_cluster_bootstraps_again(self) -> None:
-		from cargo.mail.cluster import bootstrap
-
-		# Its embedded store lives on the node, so the node may come back empty.
-		solo = make_cluster(name="solo", hostname=f"mail.solo.{ROOT_DOMAIN}", multi_node=False)
-		# A shared store outlives any node: the node only rejoins.
-		shared = make_cluster()
-		for cluster, ip in ((solo, "203.0.113.1"), (shared, "203.0.113.10")):
-			node = make_node(cluster, ip)
-			node.db_set("is_bootstrap_node", 1)
-			cluster.db_set({"status": "Active", "bootstrap_node": node.name})
-
-		target = "cargo.mail.cluster.bootstrap.create_server_job"
-		with patch(target) as create:
-			bootstrap.provision_node(frappe.get_doc("Stalwart Node", solo.bootstrap_node))
-			bootstrap.provision_node(frappe.get_doc("Stalwart Node", shared.bootstrap_node))
-		self.assertEqual(
-			[c.args[1] for c in create.call_args_list], ["bootstrap-cluster.yml", "configure-node.yml"]
-		)
-		self.assertEqual(frappe.db.get_value("Stalwart Cluster", solo.name, "status"), "Bootstrapping")
-		self.assertEqual(frappe.db.get_value("Stalwart Cluster", shared.name, "status"), "Active")
-
-	def test_retried_bootstrap_recovers_a_failed_cluster(self) -> None:
-		from cargo.mail.cluster import bootstrap
-
-		cluster = make_cluster()
-		node = make_node(cluster, "203.0.113.10")
-		node.db_set({"is_bootstrap_node": 1, "status": "Provisioning"})
-		cluster.db_set({"status": "Failed", "bootstrap_node": node.name})
-		job = frappe._dict(retries=1, max_retries=1, error_log="boom")
-
-		node.after_provision_failed(job)  # first failure keeps the cluster retryable
-		self.assertEqual(frappe.db.get_value("Stalwart Cluster", cluster.name, "status"), "Failed")
-
-		with (
-			patch("cargo.mail.cluster.bootstrap.check_node", return_value=False),
-			patch("cargo.mail.cluster.dns.sync_node_records"),
-			patch("cargo.mail.cluster.dns.sync_spf_record"),
-		):
-			bootstrap.after_provision(node, job)
-		self.assertEqual(frappe.db.get_value("Stalwart Cluster", cluster.name, "status"), "Bootstrapping")
-
-		node.after_provision_failed(frappe._dict(retries=2, max_retries=1, error_log="boom"))
-		self.assertEqual(frappe.db.get_value("Stalwart Cluster", cluster.name, "status"), "Failed")
-
 	def test_outbound_nodes_stay_out_of_ingress(self) -> None:
 		from cargo.mail.cluster import bootstrap
 
 		cluster = make_cluster()
 		node = make_node(cluster, "203.0.113.20", role="outbound")
 		self.assertFalse(bootstrap.serves_clients(node))
-		self.assertEqual(bootstrap.build_node_variables({"node": node.name})["wait_ports"], [])
 		bootstrap.activate_node(node)
 		self.assertFalse(
 			frappe.db.exists(
@@ -442,7 +327,6 @@ class TestStalwartCluster(IntegrationTestCase):
 			"ip4:203.0.113.20",
 			frappe.db.get_value("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "spf.blr"}, "value"),
 		)
-		self.assertRaisesRegex(frappe.ValidationError, "must serve clients", bootstrap.provision_node, node)
 
 	def test_bootstrap_and_cluster_plans(self) -> None:
 		cluster = make_cluster()

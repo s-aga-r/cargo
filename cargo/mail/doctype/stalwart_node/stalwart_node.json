@@ -20,12 +20,6 @@
   "column_break_network",
   "in_ingress_dns",
   "ptr_verified",
-  "ssh_section",
-  "ssh_user",
-  "ssh_port",
-  "column_break_ssh",
-  "ssh_verified",
-  "ssh_host_keys",
   "state_section",
   "installed_version",
   "node_id",
@@ -147,42 +141,6 @@
    "read_only": 1
   },
   {
-   "fieldname": "ssh_section",
-   "fieldtype": "Section Break",
-   "label": "SSH"
-  },
-  {
-   "description": "User Ansible logs in as. Leave blank to use the cluster's SSH user.",
-   "fieldname": "ssh_user",
-   "fieldtype": "Data",
-   "label": "SSH User"
-  },
-  {
-   "description": "Leave blank to use the cluster's SSH port.",
-   "fieldname": "ssh_port",
-   "fieldtype": "Int",
-   "label": "SSH Port"
-  },
-  {
-   "fieldname": "column_break_ssh",
-   "fieldtype": "Column Break"
-  },
-  {
-   "default": "0",
-   "description": "Verify SSH reached the server with the cluster's key. Required before Provision; reset when the IP changes.",
-   "fieldname": "ssh_verified",
-   "fieldtype": "Check",
-   "label": "SSH Verified",
-   "read_only": 1
-  },
-  {
-   "description": "The server's SSH host keys, recorded by Verify SSH on first contact and required to match on every later connection. Cleared when the address or port changes. After reinstalling the server, use Reset SSH Host Keys and verify again.",
-   "fieldname": "ssh_host_keys",
-   "fieldtype": "Small Text",
-   "label": "SSH Host Keys",
-   "read_only": 1
-  },
-  {
    "fieldname": "state_section",
    "fieldtype": "Section Break",
    "label": "State"
@@ -229,11 +187,6 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [
-  {
-   "group": "Jobs",
-   "link_doctype": "Server Job",
-   "link_fieldname": "server"
-  },
   {
    "group": "DNS",
    "link_doctype": "DNS Record",

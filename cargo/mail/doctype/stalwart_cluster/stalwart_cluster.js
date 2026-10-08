@@ -32,7 +32,6 @@ frappe.ui.form.on('Stalwart Cluster', {
 			frm.add_custom_button(__('Reconcile Directory'), () => frm.trigger('reconcile_directory'), __('Configuration'))
 			frm.add_custom_button(__('Rotate API Key'), () => frm.trigger('rotate_api_key'), __('Access'))
 			frm.add_custom_button(__('Replace DKIM Keys'), () => frm.trigger('replace_dkim_keys'), __('Access'))
-			frm.add_custom_button(__('Upgrade Nodes'), () => frm.trigger('upgrade_nodes'), __('Nodes'))
 		}
 		if (frm.doc.status === 'Bootstrapping') {
 			frm.add_custom_button(__('Finish Bootstrap'), () => frm.trigger('finish_bootstrap'), __('Nodes'))
@@ -53,7 +52,7 @@ frappe.ui.form.on('Stalwart Cluster', {
 		}
 		if (frm.doc.status === 'Pending') {
 			frm.dashboard.add_comment(
-				__('Add the cluster SSH public key to the first node VPS, create a Stalwart Node and provision it.'),
+				__('Create the first Stalwart Node.'),
 				'blue',
 				true,
 			)
@@ -130,12 +129,6 @@ frappe.ui.form.on('Stalwart Cluster', {
 	replace_dkim_keys(frm) {
 		frappe.confirm(__('Generate new DKIM keys for {0}? Without a DNS provider on the zone the new records must be published by hand.', [frm.doc.default_domain]), () => {
 			frm.events.call(frm, 'replace_dkim_keys', {}, __('Replacing keys...'))
-		})
-	},
-
-	upgrade_nodes(frm) {
-		frappe.confirm(__('Upgrade every active node to {0}, one at a time?', [frm.doc.stalwart_version]), () => {
-			frm.events.call(frm, 'upgrade_nodes', {}, __('Queueing upgrades...'))
 		})
 	},
 

@@ -42,12 +42,6 @@
   "admin_password",
   "column_break_admin",
   "api_key",
-  "ssh_section",
-  "ssh_user",
-  "ssh_port",
-  "column_break_ssh",
-  "ssh_public_key",
-  "ssh_private_key",
   "egress_tab",
   "default_egress_pool",
   "column_break_egress",
@@ -298,45 +292,6 @@
    "fieldtype": "Password",
    "hidden": 1,
    "label": "API Key"
-  },
-  {
-   "fieldname": "ssh_section",
-   "fieldtype": "Section Break",
-   "label": "SSH"
-  },
-  {
-   "default": "root",
-   "description": "User Ansible logs in as on the nodes. Needs root or passwordless sudo.",
-   "fieldname": "ssh_user",
-   "fieldtype": "Data",
-   "label": "SSH User",
-   "reqd": 1
-  },
-  {
-   "default": "22",
-   "description": "SSH port on the nodes. Individual nodes can override user and port.",
-   "fieldname": "ssh_port",
-   "fieldtype": "Int",
-   "label": "SSH Port",
-   "reqd": 1
-  },
-  {
-   "fieldname": "column_break_ssh",
-   "fieldtype": "Column Break"
-  },
-  {
-   "description": "Generated on save. Add it to the authorized keys of the SSH user on every node and gateway VPS before provisioning.",
-   "fieldname": "ssh_public_key",
-   "fieldtype": "Code",
-   "label": "SSH Public Key",
-   "read_only": 1
-  },
-  {
-   "description": "Generated on save; written to a temporary file only while a job runs.",
-   "fieldname": "ssh_private_key",
-   "fieldtype": "Password",
-   "hidden": 1,
-   "label": "SSH Private Key"
   },
   {
    "fieldname": "egress_tab",
