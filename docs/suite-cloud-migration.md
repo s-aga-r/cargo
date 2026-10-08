@@ -234,3 +234,179 @@ A Critical verdict reaches only Error Log today, for mail as for Garage; nothing
 **Valkey loss.** Phase 6 stops Valkey on a live three-node cluster, records what Stalwart does with inbound and outbound mail, restarts it, and confirms leases reappear without a Stalwart restart. What is observed is written into `docs/mail.md`. A node joining during the outage is expected to fail after the bootstrap deadline.
 
 **Garage Critical.** Blob writes fail, so inbound mail is deferred by senders and body reads fail. Mail health inherits Critical; the runbook points at `docs/health.md`.
+
+## Phases
+
+Each phase ends with the whole Cargo test suite passing and names its rollback. For the copy phases, rollback means reverting the commits; nothing outside this repository changes before phase 3b.
+
+### Phase 0: Prepare
+
+1. Relicensing. Record the copyright holder's approval in `docs/licensing.md`: origin, pinned commit, licence, approver, date. Fill the `[year] [fullname]` placeholders in `license.txt`. `cargo/workflow_engine`, vendored from frappe/press under AGPL, has the same gap; it is raised with the maintainer, not folded in here.
+2. Merge `feat/send-only-accounts` in Suite Cloud. Record the commit here and in `docs/licensing.md` as `last_forwarded_commit`.
+3. Agree track C with Atlas and track G with whoever runs the base domain. Apply the [contract changes](#contract-changes) to `docs/atlas-contract.md`.
+4. Agree the site identifier (Central's `Site.name`) and the claim table with Central. File the two Pilot allow-list entries now; phase 5 is blocked on them.
+5. Decide the hooks. Suite Cloud sets `use_json_request_body` and `require_type_annotated_api_methods`; both are per app, and every Cargo whitelisted method is already annotated, so both go into `cargo/hooks.py`.
+
+**Fix forwarding.** Every Suite Cloud change under `cloud_mail/`, `dns/`, the DNS doctypes, `api/` or `Suite Site` gets a matching Cargo PR or a one-line "not ported, because" note. Before each Cargo mail PR merges, `git log <last_forwarded_commit>..HEAD -- suite_cloud/cloud_mail suite_cloud/dns suite_cloud/api` is walked in Suite Cloud, each commit ported or rejected, and the marker bumped. The mapping is the "where each part lands" table. Forwarding ends when Suite Cloud's data is migrated and the repository archived.
+
+### Phase 1: Copy the mail code
+
+1. Copy to the paths above. Rename `Suite Site` to `Mail Site`. Keep the `frappe-suite-verification` TXT prefix, because domain owners have published it.
+2. Leave out `provisioning/`, `Server Job`, `Server Job Task`, `install.py`, `patches/` and `stalwart_store/`.
+3. Rename imports from `suite_cloud.` to `cargo.`, reformat to tabs, replace the dropped helpers, create Mail Settings with the split above.
+4. DNS to core. `DNS Record.managed_by_doctype` becomes a Link to DocType instead of a Select of mail doctypes. `default_ttl` reads the zone only, with the zone's `default_ttl` required and defaulting to 300. `frappe.only_for("System Manager")` replaces the dropped role. `enqueue_verify_all_dns_records` goes through `frappe.enqueue(..., deduplicate=True)`. `stalwart_dns_server` moves to `plan.dns_server_object`; `is_default` goes. Tests land at `cargo/dns/test_resolver.py` and under `cargo/cargo/doctype/dns_zone/`.
+5. The tenancy data-model changes from the table above, with tests in `test_tenancy.py`: an owner-less domain inserts; a site adding a name under the zone is still refused; site A's platform account is visible to A and not found for B; `owned("Mail Domain", <shared>)` is not found for every site; an address on the shared domain is refused as a recipient; counts exclude the platform account; archive disables domains; purge after retention; takeover of an archived site's domain.
+6. Hooks: hourly domain refresh and verification, hourly DMARC and TLS fetch; daily DNS record verification, reverse DNS verification, report pruning, drift check, ownership re-check and `purge_disabled_domains`. Not copied: `poll_pending_nodes`, `retry_failed_jobs`.
+
+Ends when the directory, tenancy, DNS, DMARC and TLS tests pass against the fake Stalwart. Nodes cannot be provisioned yet.
+
+### Phase 2: Authentication
+
+1. The signing helpers in `cargo/testing.py`; `test_bucket.py` and `api/test_webhooks.py` converted to them.
+2. `verify_token(scopes)` with the rules above; `bucket:*` required on the bucket endpoints and on `configure`.
+3. The lifecycle API behind `mail:*`, creating Mail Site rows named by Central's `Site.name` and accepting `mailboxes_allowed`, the limits, the team's ownership token and `delete_data`. `suspend_site` and `archive_site` lock accounts as described.
+4. The directory API behind `mail` with `site`. `create_domain(domain, grant)`.
+5. `docs/central-contract.md` rewritten against Central's code first (see [contract changes](#contract-changes)), then the claim table, `mail_token`, `mail_domain_grant`, the lifecycle calls and the domain events added.
+6. `test_api_contract.py`: a frozen list of whitelisted paths equal to what the Suite app's `fake_suite_cloud.py` dispatches; each refuses a request without a token; the exception names the Suite client switches on are kept (`SiteSuspendedError`, `StalwartRejected`, `ClusterMisconfiguredError`, Frappe's `DoesNotExistError`, `DuplicateEntryError`, `TooManyRequestsError`); `owned()` still raises `DoesNotExistError` for another site's object.
+
+Ends when the rewritten `test_site_api.py` and `test_tenancy.py` pass with the real `token_claims` through `trusted_test_keys()`, covering: a site reaches its own objects and gets not-found for others; Central acts on any site and on unowned domains; `mailboxes_allowed` off forces send-only and refuses groups, lists and catch-all; `bucket:*` is refused by the mail API and `mail` by the bucket API with 403; a wrong `aud`, `iss`, `kid` or an expired token is 401 with no Mail Site lookup; Suspended answers `SiteSuspendedError`, Archived or unknown answers 401; a background call is refused without fetching keys; the throttle keys on `site`; an Atlas-signed token carrying `site` or `mail` is refused; scope `*` satisfies nothing; suspend, resume and archive leave the expected roles and domain flags on the fake Stalwart.
+
+### Phase 2b: Extract the regional-service helpers
+
+Finished before Stalwart Cluster, Postgres, Valkey or SFU is written. The two existing services change here, so the maintainer is told before this phase starts.
+
+`cargo/service.py` holds plain functions, not a mixin: `SelfCallVisitor` reads `cls.__dict__`, so an inherited `@task` runs but is never recorded as a Press Workflow Step. The functions: the header and status constants, `wildcard_domain()`, `service_domain`, `service_endpoint`, `publish_routes`, `mark`, `configure_service_webhook(doc, service, name, endpoint)` replacing the two near-identical webhook builders, and `single_machine_sync`. `cargo/spawn.py` gains `MAX_SETUP_ATTEMPTS`, `run_spawner`, `report_dead_machines` and `retry_setup`. `Role` gains `MAIL`, `POSTGRES` and `VALKEY`. `TRUSTED_PROXIES` becomes `fdaa::/16`. `cargo/ssh.py` records a Machine's host key on first contact (`Machine.ssh_host_key`) and pins it afterwards. `health/` is split into `cargo/health/`. Object Storage Cluster, its `setup.py` and Datum Server are ported onto all of it.
+
+Porting Datum Server fixes a bug it has today: `sync_machines` compares `Machine.status` (`Broken`, `Terminated`) against Atlas's `DEAD_STATES` (`failed`), so a dead datum machine is never marked Failed. `single_machine_sync` uses `DEAD_MACHINE_STATES`.
+
+Ends when `test_spawn.py`, `test_object_storage_cluster.py`, `test_datum_server.py`, `api/test_webhooks.py` and the health tests pass unchanged, and `docs/service.md` describes the pattern. Rollback: revert; the two services behave as before.
+
+### Phase 3a: Provisioning, locally
+
+1. `Machine.public_ipv4` and the `firewall` argument on `create_vm`. Stalwart Node and Egress Gateway linked to a Machine; node validation accepts a missing public address.
+2. Scripts: `install.sh` (packages, Unbound with the DNSSEC `ad` check, the `stalwart` user, versioned binaries behind a symlink, the unit, optional `ufw`), `bootstrap.sh`, `configure.sh`, `upgrade.sh`, `rollback.sh`. `bootstrap.sh` keeps every gate the playbook has as its own step: skip when `config.json` exists; delete stale plan markers before a fresh bootstrap; tolerate "already been initialized" and rewrite `config.json`; bootstrap, recovery for the defaults, one normal start, stop, recovery for the cluster plan and admin, normal, each wait bounded at 120 seconds; `trap EXIT` removes the plans and rewrites the normal environment; the marker is written only after a successful apply; `grep STALWART_RECOVERY` must fail before the final restart; a `registry.(validation-error|build-error)` line since `ActiveEnterTimestamp` fails the run. The Ubuntu 20.04 workarounds go: Atlas boots 24.04.
+3. Flows: `provision` (rent, wait for Running through `defer_current_task`, `install.sh`, `bootstrap.sh` or `configure.sh`, publish DNS, wait for the lease and promote, with the 45-minute deadline counted from `provisioned_at`), `upgrade` (serialised), `rollback_node`, `drain`, `restore`, `reconfigure_nodes`, `sync_firewall`. Each ordering the playbooks rely on (`check_dnssec_resolution` before `install_stalwart`, `forget_stale_plan_markers` before `check_cluster_plan_applied`, `apply_defaults_plan` before `start_normally`, `check_start_for_config_errors` last) is a task boundary asserted with `called_methods_in_order`.
+4. Secret masking in `cargo/ssh.py` and the three rules above.
+5. `management_url`, `certificate_management`, `verify_stalwart_tls`; the pinned `STALWART_VERSION` and the spam-rules version in `plan.py`, with the cluster fields defaulting from them.
+6. `MailHealth`.
+7. `tools/e2e/mail.sh` against `fake_atlas --systemd`: fake_atlas publishes port 443 for role `mail`, `/etc/hosts` gains the cluster hostname, a provider-less DNS Zone and `certificate_management: Manual` are used, and a RocksDb single-node cluster is provisioned through the real flow. It asserts the cluster and node Active, `check_drift()` empty, the `suite-disabled` role present, no `STALWART_RECOVERY` in the environment, no `*.ndjson` under `/etc/stalwart`, exactly one marker, the registry grep clean, and a second `provision` a no-op.
+8. `tools/stalwart-compat/run.sh`, a CI job with path filters: it renders the exact script texts for a Postgres and Redis cluster with no blob store and no provider, pipes `install.sh` then `bootstrap.sh` into a systemd container running apt Postgres and Redis, then reads `Domain`, `Role`, `ClusterRole` and `SpamSettings` back through Cargo's own client. That proves the wire format the fake Stalwart accepts without checking. It also confirms a failed ACME order is not logged as a `registry.*` event.
+9. `test_provisioning.py`: the orderings; the secret test; script texts carry the expected exports, no `set -x`, and `env_normal` has no `STALWART_RECOVERY`; retry through `advance()` up to `MAX_SETUP_ATTEMPTS` and never on an Active cluster; `sync_firewall` takes typed ports and refuses anything else; `bash -n` over every script.
+
+Ends when `tools/e2e/mail.sh` and the compat job are green, Health reads Healthy for ten minutes on fake_atlas, and the lone node can be replaced (release, re-request, `bootstrap.sh`) with the cluster returning to Active. Rollback: revert; no region touched.
+
+### Phase 3b: The first real region
+
+Before starting: track C delivered (`public_ipv4` in the payload, reverse DNS, egress, inbound ports, firewall); track G delivered and the DNS Zone inserted through the enrolment environment with the write probe passing; stores entered by hand, since the Postgres and Valkey services may not exist yet (a RocksDb data store is acceptable here); `certificate_management: ACME` against the staging directory first.
+
+Ends when `tools/mail-smoke/check.sh <cluster> --phase 3` is green: `check_drift` and `reconcile_directory` empty; `verify_ptr` true; the platform domain verified; `defaultCertificateId` set with names covering the hostname; A, MX, SPF chain, DMARC and DKIM answered by a public resolver; TLS on 443, 465, 993, 587 and 25 presenting that certificate; JMAP 200 with a token and 401 without; one message from a send-only account to an external mailbox arriving with `spf=pass dkim=pass dmarc=pass`; an unknown local part rejected; and one plain site, configured by hand in `site_config.json`, sending from its platform address. Rollback: release the machine, delete the node and cluster records; the zone holds only records Cargo wrote, and `delete_managed_records` removes them.
+
+### Phase 4: One cluster per region, built by Cargo
+
+Entry gate: the Postgres and Valkey services Active in the 3b region, `docs/postgres.md` documenting a restore drill executed there once, and D1 live in Central. Until D1 lands, `accept_cargo_report` ignores `mail`.
+
+1. Link `blob_bucket`, `data_store` and `in_memory_store`. A `create_stores` task inserts the `Bucket`, `Postgres Database` and `Valkey Credential` in-process. Derive `single_node` and `coordinator`. Verify the store `update` operations live.
+2. Remove the regions table, `is_default`, `pick_cluster` and the label. Refuse a second Active cluster, as object storage does.
+3. `cargo/mail/spawn.py` with `ensure_mail`, driven by `default_mail_cluster_config` (`node_count`, `node: {cpu_millicores, ram_gb, disk_gb}`, `acme_contact_email`, version overrides), validated through `spawn_config`. It waits for Garage, Postgres and Valkey to be Active and for an enabled DNS Zone whose probe passes; otherwise it rents nothing. It adopts the platform domain and creates `postmaster@` when the cluster goes Active.
+4. The platform address, the limiters, entitlement enforcement, the `kind: "domain"` webhook. `service: "mail"` reported with `service_endpoint` set to the public HTTPS base URL.
+5. Health inheritance, metrics shipping, the Cargo database backup job and the `cargo-backups` bucket.
+6. `docs/mail.md` (records, requirements, auto spawn, health, runbooks, validation); `docs/bootstrapping.md` gains the config key and the DNS enrolment variables.
+
+Ends when, on fake_atlas, a host with the config key builds its own cluster and the webhook payload is asserted; and in the 3b region, `Service Detail <region>-mail` reads Available, datum shows `stalwart_*` series, Health is Healthy, and the restore drill passes: on fresh machines, Postgres and Cargo's database are restored from Garage with only the out-of-band credentials, the cluster returns to Active through `configure.sh` alone, and `check_drift` and `reconcile_directory` are empty. Rollback: `auto_spawn` off; the drill itself is the rollback rehearsal.
+
+### Phase 5: Callers for every site
+
+Send-only mail for every site needs one node and Central, Pilot and nothing else, so it lands before several nodes do.
+
+1. Central: a `MailClient` beside `ObjectStorageClient`. `create_site` is called from `Site.create_once_addressable`; `archive_site` from wherever Central observes a site's end. No `Site.on_trash` or termination hook was found that fits, so that anchor is Central's to name before this phase starts. `Team Service.add_on_service` gains `mail`, carrying `mailboxes_allowed` and the limits, with `update_site` on change; a Suite signup seeds it.
+2. The send-only credential. Cargo keeps the app password encrypted on the Mail Account and never returns it from `create_site`. Central's `mail-credential` action, pushed with `_post_to_pilot` and `mint_bench_login` as `rename_site` is, carries a password obtained once from `rotate_app_password` with its `mail:*` token. Pilot writes `mail_server`, `mail_port`, `use_tls`, `mail_login`, `mail_password` and `auto_email_id` into that site's `site_config.json` through `Site.set_config_values`. Frappe reads these natively, so a plain site needs no app. Every fetch is a rotation; Central stores no mail secret; revocation is the role lock. Frappe uses these keys only for the default outgoing account, so a site with its own Email Account keeps using it.
+3. Central adds `mint_mail_token` and `central.api.pilot.mail_token`; Pilot adds the allow-list entry and the action, with cases in its Central client tests.
+
+Ends when a plain site on Central staging sends its first mail from `site_config.json` alone, with nothing configured by hand. Rollback: the `Team Service` row removed and `archive_site` called.
+
+### Phase 6: Several nodes, upgrades, failure drills, sending pools
+
+Suite Cloud's README lists these as never run on a live server: several nodes with a Redis coordinator, node upgrades and the egress gateway.
+
+1. Add nodes; each joins the ingress record once its lease is active; auto-drain and auto-restore.
+2. A serialised rolling upgrade, then one node rolled back to the previous version and restored to ingress.
+3. Kill one node's machine and replace it, with mail flowing throughout. Stop Valkey, record, restart.
+4. Egress Gateway on a Machine with several public addresses (track C2), a local RocksDb store, `sync_firewall`. Plain sites send through a pool separate from Suite sites.
+
+Ends when `check.sh --phase 6` is green across the upgrade, the rollback, the node replacement and the Valkey restart on a three-node cluster, counting sent messages at the receiving mailbox.
+
+### Phase 7: Suite sites, customer domains, several regions
+
+1. The Suite app's client calls `/api/method/cargo.mail.api.*` with `X-Cargo-Access-Token` from the proxied token. Suite Settings drops `suite_cloud_url`, `site_api_key` and `site_api_secret` for a read-only connection panel fed by `mail_token` and `ping`; `is_suite_cloud_configured` becomes "site config has `pilot_endpoint` and `pilot_auth_token` and the last token fetch succeeded", with its call sites unchanged. The client tests pin the new prefix, header and exception map.
+2. Coexistence. A Suite site uses Cargo when that condition holds and the old Suite Cloud client otherwise, until its data is migrated. A Suite Cloud customer domain is not registered in Central until then, so it cannot collide with the registry.
+3. Central adds `mail_domain_grant`, `Mail Domain Registry` and the `kind: "domain"` handling; Pilot adds the second allow-list entry.
+4. Second-region domains follow the registry rules; DKIM selectors carry the region.
+
+Ends when `check.sh --phase 7` is green: a Suite site adds a domain through a grant and a mailbox end to end, and no new domain carries a `frappemail-*` selector. Rollback: the Suite app keeps its old client until Suite Cloud is retired.
+
+## SFU
+
+SFU is a fourth consumer of phase 2b: one `Machine` with `public_ipv4`, the `cargo/service.py` helpers without proxy routes, an `install.sh` over SSH, `service: "sfu"` through `configure_service_webhook`, `health` and `health_reason` on `cargo/health/`, and its secret delivered to sites the way the mail credential is, through a Pilot site action. Its Atlas asks are the generic ones below, with TCP 80 and 443 and a UDP range for media. Nothing here is mail-specific, and D1's open service list means it costs Central no further change.
+
+## Contract changes
+
+`docs/atlas-contract.md`: replace "no public address is asked for" and "`network.public_ipv4` is never used" with the role-based asks. A tenant `0` machine may request a public IPv4, reported as `network.public_ipv4`; reverse DNS to a hostname Cargo names; egress from its own address; a `firewall` with inbound TCP and UDP ranges; several addresses (track C2); a public IPv6 on request. The per-role ports are mail's and SFU's. Note that `tools/fake_atlas` answers `public_ipv4: null`.
+
+`docs/central-contract.md` is stale and is rewritten before mail is added. Central's receiver is `central.api.state_delivery.receive`, backed by `central/integrations/state_delivery.py`, with `X-FC-Source`, `X-FC-Region` and `X-Frappe-Webhook-Signature`; the client is `central/integrations/cargo.py` beside `object_storage.py`; `Cargo Instance` became `Region.cargo_*` and `Service Backend` became `Service Detail`; the accepted statuses are `Available` and `Not Available`, which Cargo already sends; and Central already mints the `atlas-cargo:<region-id>` audience with scope `bucket:*` (`mint_cargo_token`) for `configure_webhooks` and the bucket calls, so the "Central does not mint it yet" line goes. Then the mail additions: `service: "mail"`, the token route and claim table, the lifecycle calls, the `kind: "domain"` deliveries, the grant, the ownership rules, and the scope row in the check table.
+
+## Deferred
+
+| Item | Why |
+|---|---|
+| An out-of-region copy of the Postgres, Cargo and blob backups | First to pick up: one Garage loss takes bodies and backups together. |
+| Health verdicts delivered to Central | Critical reaches Error Log only, for every service. One `kind: "health"` delivery through the shared helper. |
+| Log shipping from Cargo-managed machines to datum | One shipper for Garage, Postgres, Valkey and Stalwart, decided together; datum speaks no OTLP. |
+| Postgres and Valkey high availability | Postgres down stops all mail; Valkey down stops coordination and rate limiting. A stable address in front of Valkey needs no mail change. |
+| A platform-wide SPF include | Central- or operator-owned DNS; per-mechanism verification accepts either shape. |
+| Unifying the `_frappe-verification` and `frappe-suite-verification` records | Two proofs for one customer domain; a Central follow-up. |
+| Moving records from the running Suite Cloud site; retiring `frappe/suite_cloud` and the old Suite client | Follows the data migration. Fix forwarding ends here. |
+| A search store | Stalwart indexes into the data store until one is needed. |
+| `shellcheck` in pre-commit | Repo-wide; offered to the maintainer separately. |
+
+## Risks
+
+| Risk | Mitigation |
+|---|---|
+| The playbooks carry lessons from a real bootstrap, and a port can lose them | Each gate is a named task asserted in order; `tools/stalwart-compat` runs the real scripts against the pinned binary in CI; the real machine then proves only networking, reverse DNS and certificates. |
+| Four state holders, not one; Cargo's database and Garage are as irreplaceable as Postgres | Phase 4 ends with the restore drill; keys held out of region; the out-of-region copy is the first deferred item. |
+| Four teams on the critical path to the first real region | Phase 3a proves Cargo's part before any of them deliver; the checklist gates 3b. |
+| A dead node's IPv4 left in SPF is reissued to someone who then sends as the region's domains | Health detects death and resyncs SPF; `forget_node` before replacement; blocklist check before a new address is published. |
+| The port loses Ansible's `no_log` | Masking at the SSH boundary and the secret-leak test; a secret in a workflow record fails the suite. |
+| Stalwart's Prometheus exporter, store `update` operations, path-style S3, the outbound limiters, multi-node leases and stale `ClusterNode` rows are unverified on the pinned version | Each is confirmed on the 3b region before a phase depends on it. |
+| Mixed Stalwart versions on one Postgres during an upgrade | A per-release decision from the notes; the stop-all path otherwise. |
+| The platform domain's reputation is shared by every tenant | Per-site and per-domain outbound limiters; plain sites on their own egress pool. |
+| Account-wide DNS provider tokens | A delegated zone in an account holding nothing else. Suite Cloud's live run used DigitalOcean, so this differs from what was tested. |
+| Whether tenant machines reach tenant `0` machines over the mesh | An Atlas question in track C; Postgres and Valkey authenticate regardless. |
+| Suite Cloud's hooks `use_json_request_body` and `require_type_annotated_api_methods` change request parsing for every Cargo endpoint | Decided in phase 0 with the existing tests as the check. |
+
+## Review findings and where they land
+
+The earlier draft was reviewed from seven angles; 46 findings stood after each was checked against the code, and three fell. Where each landed:
+
+| Finding | Where | Note |
+|---|---|---|
+| Scope check underspecified; `configure` left open | Authentication, phase 2 | Adopted: issuer binding, exact matching, `site` binding. |
+| Suspend and archive do not stop mail | Tenancy | Adopted: role lock; groups untouched; domains disabled only on archive. |
+| Secrets persist in the engine; `no_log` lost | Secrets, phase 3a | Adopted with the leak test. |
+| No firewall for public machines | Network exposure | Adopted: Atlas firewall first, `ufw` as fallback. |
+| Postgres is not the only irreplaceable state | State and recovery | Adopted: four holders, Cargo backup job, keys out of region. |
+| No health, auto-drain, metrics, alerting | Health and telemetry | Adopted; alerting to Central and log shipping deferred and named. |
+| ACME and DNS zone provenance | Names, zone and certificates | Adopted: delegated zone, enrolment variables, write probe. |
+| Dead node has no path | Operating the cluster | Adopted; replacement stays an operator's call. |
+| Extract the service pattern first | Phase 2b | Adopted as plain functions; `cargo/spawn.py` extended. |
+| Drop Stalwart Store | Stores Cargo runs | Adopted; RocksDb survives as a builder for gateways and tests. |
+| Phase gates contradict; prerequisites hidden; one linear list; token channel unbuilt | Environments and tracks, phases 3a and 3b, phase 5 | Adopted: per-phase environments, tracks table, callers moved before several nodes. |
+| fake_atlas can run bootstrap; plans unvalidated against the binary; dropped Server Job tests; phase 2 exit and test signing; contract and smoke tests | Phases 2, 3a, 3b | Adopted. |
+| Domain registry has no arbiter; SPF cannot pass in two regions; platform address unrepresentable; archive and retention; ownership reclaim | Tenancy | Adopted with the grant shape and per-mechanism SPF. |
+| Owner-less domains unrepresentable; unattended bootstrap inputs; Postgres and Valkey contract; Valkey failure mode; RocksDb for gateways | Tenancy, zone provenance, stores | Adopted; the plain `Redis` type is kept, Sentinel is not added now. |
+| Retry and idempotency; Cargo down; rolling upgrade and rollback | Not copied table, operating the cluster | Adopted; the engine resumes flows itself. |
+| DNS doctypes to core; Machine to node; Mail Settings split; hooks and sidebar | Phase 1, names and addresses, where each part lands | Adopted. |
+| Entitlement on the row, not the scope; Suite UX; stale contract documents; licensing mechanics; SFU | Decisions, phase 7, contract changes, phase 0, SFU | Adopted. |
+| A service-agnostic Site record in Cargo's core | — | Refuted: Central has no single Site per site either, and nothing but mail needs a per-site row today. |
+| Valkey not needed for a single node, so ship phase 4 without it | — | Refuted: the premise holds, but it would mean a second cutover and contradicts the start order in decision 6. |
+| CI shape, semgrep and pip-audit | — | Refuted: three of five claims contradicted by the configuration; the rest is a workflow tweak. |
