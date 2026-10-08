@@ -5,8 +5,8 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-from cargo.dns.provider import DNSProvider
 from cargo.cloud_mail.utils import password_or_none
+from cargo.dns.provider import DNSProvider
 
 # A change to any of these means the stored provider access may no longer work.
 PROVIDER_FIELDS = (

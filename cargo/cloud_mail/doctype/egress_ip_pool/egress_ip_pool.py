@@ -8,9 +8,9 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint
 
-from cargo.dns.resolver import verify_ptr_record
 from cargo.cloud_mail.cluster import dns, egress, naming
 from cargo.cloud_mail.doctype.stalwart_node.stalwart_node import validate_ip
+from cargo.dns.resolver import verify_ptr_record
 
 POOL_NAME = re.compile(r"^[a-z0-9]{1,8}$")
 FIRST_RELAY_PORT = 2525

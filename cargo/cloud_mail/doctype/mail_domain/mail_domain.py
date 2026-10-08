@@ -6,7 +6,6 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, now
 
-from cargo.dns.resolver import verify_dns_record
 from cargo.cloud_mail.cluster import dns as cluster_dns
 from cargo.cloud_mail.cluster import egress
 from cargo.cloud_mail.cluster.zone import GROUPS, build_domain_records, group_summaries
@@ -21,6 +20,7 @@ from cargo.cloud_mail.tenancy.addresses import (
 	validate_email_address,
 )
 from cargo.cloud_mail.utils import dkim_algorithms, get_config, log_exception, utc_iso
+from cargo.dns.resolver import verify_dns_record
 
 # A change to any of these reaches the cluster; is_verified is set by hand only by managers.
 PUSHED_FIELDS = (

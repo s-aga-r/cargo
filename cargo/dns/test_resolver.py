@@ -5,6 +5,7 @@ from unittest.mock import patch
 import dns.exception
 import dns.resolver
 from frappe.tests import UnitTestCase
+
 from cargo.dns import resolver
 
 CLOUDFLARE, GOOGLE_2, GOOGLE_1, QUAD9 = resolver.NAMESERVERS

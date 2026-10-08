@@ -8,9 +8,9 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint
 
-from cargo.dns.resolver import verify_ptr_record
 from cargo.cloud_mail.cluster import bootstrap, dns, naming
 from cargo.cloud_mail.utils import log_exception
+from cargo.dns.resolver import verify_ptr_record
 
 REMOVABLE_STATUSES = ("Pending", "Failed", "Disabled")
 

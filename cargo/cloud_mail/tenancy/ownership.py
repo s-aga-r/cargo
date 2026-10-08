@@ -16,8 +16,8 @@ import frappe
 from frappe import _
 from frappe.utils import cint
 
-from cargo.dns.resolver import verify_dns_record
 from cargo.cloud_mail.utils import get_config
+from cargo.dns.resolver import verify_dns_record
 
 VALUE_PREFIX = "frappe-suite-verification="
 
