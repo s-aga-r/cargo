@@ -19,7 +19,6 @@ from frappe.query_builder.functions import Count
 from frappe.utils import cint
 
 from cargo.cloud_mail.stalwart.errors import StalwartRejectedError, StalwartUnauthorizedError
-from cargo.cloud_mail.utils import get_config
 
 OWNED_DOCTYPES = {"Mail Domain", "Mail Account", "Mail Group", "Mailing List"}
 MANAGER_ROLES = ("System Manager",)
@@ -66,7 +65,7 @@ def current_site():
 
 def _resolve_site():
 	api_key = _api_key_from_header()
-	service_user = get_config("site_service_user")
+	service_user = frappe.get_cached_doc("Mail Settings").site_service_user
 
 	if frappe.session.user == service_user and api_key:
 		name = frappe.db.get_value("Mail Site", {"api_key": api_key})
@@ -152,7 +151,7 @@ def site_api(fn: Callable) -> Callable:
 		except StalwartRejectedError as e:
 			raise StalwartRejected(_("The mail server rejected the change: {0}").format(_describe(e))) from e
 		except StalwartUnauthorizedError as e:
-			frappe.log_error(title="[Suite Cloud] Cluster credentials rejected", message=str(e))
+			frappe.log_error(title="Cluster credentials rejected", message=str(e))
 			raise ClusterMisconfiguredError(_("The mail cluster refused Suite Cloud's credentials.")) from e
 
 	return wrapper

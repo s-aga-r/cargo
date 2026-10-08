@@ -9,7 +9,7 @@ from frappe.utils import now
 from cargo.cloud_mail.cluster import dns, egress, naming, plan
 from cargo.cloud_mail.doctype.stalwart_node.stalwart_node import validate_ip
 from cargo.cloud_mail.stalwart import get_admin_client, get_client
-from cargo.cloud_mail.utils import dkim_algorithms, get_config, log_exception, validate_version
+from cargo.cloud_mail.utils import dkim_algorithms, log_exception, validate_version
 
 
 class EgressGateway(Document):
@@ -67,7 +67,7 @@ class EgressGateway(Document):
 		self.base_url = f"https://{self.hostname}"
 		self.ipv4_address = validate_ip(self.ipv4_address, 4)
 		self.stalwart_version = validate_version(
-			self.stalwart_version or cluster.stalwart_version or get_config("stalwart_version"),
+			self.stalwart_version or cluster.stalwart_version,
 			_("Stalwart Version"),
 		)
 

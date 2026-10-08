@@ -42,11 +42,12 @@
    "unique": 1
   },
   {
-   "description": "Blank uses the Default DNS TTL from Mail Settings.",
    "fieldname": "default_ttl",
    "fieldtype": "Int",
    "label": "Default TTL",
-   "non_negative": 1
+   "non_negative": 1,
+   "reqd": 1,
+   "default": "300"
   },
   {
    "fieldname": "column_break_zone",

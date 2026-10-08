@@ -31,9 +31,7 @@ def used_disk_by_name(rows) -> dict[str, int]:
 			client = sync.client_for(frappe._dict(cluster=cluster))
 			objects = client.accounts.get_many(list(names_by_id), properties=USAGE_PROPERTIES)
 		except StalwartError as e:
-			frappe.log_error(
-				title="[Suite Cloud] Disk usage lookup failed", message=str(e), defer_insert=True
-			)
+			frappe.log_error(title="Disk usage lookup failed", message=str(e), defer_insert=True)
 			continue
 		for o in objects:
 			if o.get("id") in names_by_id:

@@ -8,8 +8,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, now
 
-from cargo.cargo.doctype.dns_zone.dns_zone import get_default_zone
-from cargo.cloud_mail.utils import enqueue_job, get_config, user_context
+from cargo.cargo.doctype.dns_zone.dns_zone import DEFAULT_TTL, get_default_zone
 from cargo.dns import get_dns_provider
 from cargo.dns.resolver import verify_dns_record
 
@@ -54,9 +53,7 @@ class DNSRecord(Document):
 		self.ttl = self.ttl or self.default_ttl()
 
 	def default_ttl(self) -> int:
-		return cint(frappe.get_cached_value("DNS Zone", self.dns_zone, "default_ttl")) or cint(
-			get_config("default_dns_ttl")
-		)
+		return cint(frappe.get_cached_value("DNS Zone", self.dns_zone, "default_ttl")) or DEFAULT_TTL
 
 	def on_update(self) -> None:
 		if self.has_value_changed("value") or self.has_value_changed("ttl") or self.is_new():
@@ -213,5 +210,4 @@ def verify_all_dns_records() -> None:
 def enqueue_verify_all_dns_records() -> None:
 	frappe.only_for("System Manager")
 
-	with user_context("Administrator"):
-		enqueue_job(verify_all_dns_records, queue="long", deduplicate=True)
+	frappe.enqueue(verify_all_dns_records, queue="long", job_id="verify_all_dns_records", deduplicate=True)

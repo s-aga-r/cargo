@@ -22,6 +22,9 @@ PROVIDER_FIELDS = (
 )
 
 
+DEFAULT_TTL = 300
+
+
 class DNSZone(Document):
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.

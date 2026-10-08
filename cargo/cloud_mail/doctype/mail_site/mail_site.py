@@ -10,7 +10,6 @@ from frappe.query_builder.functions import Sum
 from frappe.utils import cint, flt, now
 
 from cargo.cloud_mail.stalwart.directory import DISK_QUOTA, GB
-from cargo.cloud_mail.utils import get_config
 
 DIRECTORY_DOCTYPES = ("Mail Account", "Mail Group", "Mailing List", "Mail Domain")
 
@@ -71,9 +70,7 @@ class MailSite(Document):
 			frappe.utils.validate_email_address(self.contact_email, throw=True)
 		self.allowed_ips = "\n".join(str(n) for n in parse_networks(self.allowed_ips))
 
-		self.user = get_config("site_service_user")
-		if not self.user:
-			frappe.throw(_("The site service user is missing; run bench migrate."))
+		self.user = frappe.get_cached_doc("Mail Settings").site_service_user
 		self.validate_disk_quotas()
 
 		if self.is_new():

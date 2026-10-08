@@ -10,7 +10,7 @@ from cargo.cloud_mail.cluster import dns, plan
 from cargo.cloud_mail.stalwart import forget_sessions, get_client, has_credentials
 from cargo.cloud_mail.stalwart.credentials import Credential
 from cargo.cloud_mail.stalwart.errors import StalwartError, StalwartUnauthorizedError
-from cargo.cloud_mail.utils import log_error, log_exception
+from cargo.cloud_mail.utils import log_exception
 
 if TYPE_CHECKING:
 	from frappe.model.document import Document
@@ -111,7 +111,7 @@ def _push_initial_config(cluster: Document) -> None:
 		cluster.push_config()
 	except StalwartError as e:
 		cluster.db_set("drift_report", frappe.as_json({"error": str(e)}), update_modified=False)
-		log_error(f"Initial config push failed for {cluster.name}", message=str(e))
+		frappe.log_error(title=f"Initial config push failed for {cluster.name}", message=str(e))
 
 
 def _registry_problem(cluster: Document, registry: dict | None) -> str | None:

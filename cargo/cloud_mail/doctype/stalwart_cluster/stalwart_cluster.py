@@ -12,7 +12,7 @@ from cargo.cargo.doctype.dns_zone.dns_zone import get_default_zone
 from cargo.cloud_mail.cluster import bootstrap, dns, egress, naming, plan, reconcile
 from cargo.cloud_mail.stalwart import forget_sessions, get_admin_client, get_client
 from cargo.cloud_mail.stalwart.credentials import Credential
-from cargo.cloud_mail.utils import dkim_algorithms, get_config, log_exception, validate_version
+from cargo.cloud_mail.utils import dkim_algorithms, log_exception, validate_version
 
 LABEL = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 STORE_KINDS = {
@@ -164,10 +164,9 @@ class StalwartCluster(Document):
 
 	def apply_defaults(self) -> None:
 		self.stalwart_version = validate_version(
-			self.stalwart_version or get_config("stalwart_version"), _("Stalwart Version")
+			self.stalwart_version or plan.STALWART_VERSION, _("Stalwart Version")
 		)
-		self.acme_directory_url = self.acme_directory_url or get_config("acme_directory_url")
-		self.acme_contact_email = self.acme_contact_email or get_config("acme_contact_email")
+		self.acme_directory_url = self.acme_directory_url or plan.ACME_DIRECTORY_URL
 
 	def validate_stores(self) -> None:
 		for field, kind in STORE_KINDS.items():

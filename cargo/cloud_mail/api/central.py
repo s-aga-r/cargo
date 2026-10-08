@@ -9,7 +9,7 @@ import frappe
 from frappe import _
 
 from cargo.cloud_mail.api.site import as_list
-from cargo.cloud_mail.utils import child_rows, get_public_url
+from cargo.cloud_mail.utils import child_rows
 
 ROLE = "Frappe Cloud"
 
@@ -66,13 +66,20 @@ def create_site(
 	doc.insert(ignore_permissions=True)
 
 	frappe.local.response["http_status_code"] = 201
-	return {**credentials(doc, doc.new_secret), **doc.to_api(), "suite_cloud_url": get_public_url()}
+	return {
+		**credentials(doc, doc.new_secret),
+		**doc.to_api(),
+		"suite_cloud_url": frappe.db.get_single_value("Cargo Settings", "cargo_url"),
+	}
 
 
 @frappe.whitelist(methods=["GET", "POST"])
 def get_site(site: str) -> dict:
 	require_frappe_cloud()
-	return {**load(site).to_api(), "suite_cloud_url": get_public_url()}
+	return {
+		**load(site).to_api(),
+		"suite_cloud_url": frappe.db.get_single_value("Cargo Settings", "cargo_url"),
+	}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -114,7 +121,7 @@ def update_site(
 		if value is not None:
 			doc.set(field, value)
 	doc.save(ignore_permissions=True)
-	return {**doc.to_api(), "suite_cloud_url": get_public_url()}
+	return {**doc.to_api(), "suite_cloud_url": frappe.db.get_single_value("Cargo Settings", "cargo_url")}
 
 
 @frappe.whitelist(methods=["POST"])

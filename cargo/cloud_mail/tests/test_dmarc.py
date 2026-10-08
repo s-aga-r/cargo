@@ -335,8 +335,8 @@ class TestDmarcReports(SiteApiTestCase):
 		self.fake._add("DmarcExternalReport", stalwart_report("acme.com"))
 		self.fetch()
 		frappe.db.set_value("DMARC Report", {"cluster": self.cluster.name}, "expires_at", add_days(NOW, -1))
-		with patch("cargo.cloud_mail.reports.get_config", return_value=-30):
-			dmarc_report.prune_expired_reports()
+		frappe.db.set_single_value("Mail Settings", "dmarc_report_retention_days", -30)
+		dmarc_report.prune_expired_reports()
 		self.assertEqual(len(self.report_names()), 1)
 		settings = frappe.get_doc("Mail Settings")
 		settings.dmarc_report_retention_days = 0

@@ -3,7 +3,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from cargo.cloud_mail.cluster import dns, egress
+from cargo.cloud_mail.cluster import dns, egress, plan
 from cargo.cloud_mail.stalwart import forget_sessions
 from cargo.cloud_mail.tests.fake_stalwart import FakeStalwart
 from cargo.cloud_mail.tests.fixtures import (
@@ -288,15 +288,14 @@ class TestEgress(IntegrationTestCase):
 		self.assertEqual(operations["DnsResolver"]["value"]["@type"], "Custom")
 		self.assertIn("SpamSettings", operations)
 
-		variables = egress.build_gateway_variables({"gateway": self.gateway.name})
-		self.assertEqual(variables["wait_ports"], [443, 2525])
-		self.assertIn("STALWART_ROLE=egress", variables["env_normal"])
-		self.assertIn('"object":"SpamSettings"', variables["defaults_ndjson"])
-		self.assertIn('"name":"egress"', variables["defaults_ndjson"])  # the role env_normal names
-		self.assertNotIn('"name":"full"', variables["defaults_ndjson"])
-		self.assertIn('"object":"DnsResolver"', variables["defaults_ndjson"])
-		self.assertIn('"@type":"RocksDb"', variables["bootstrap_ndjson"])
-		self.assertIn(pool.pool_name, variables["cluster_ndjson"])
+		self.assertIn("STALWART_ROLE=egress", plan.render_env(egress.gateway_env(self.gateway, "normal")))
+		defaults = plan.to_ndjson(egress.gateway_defaults_plan())
+		self.assertIn('"object":"SpamSettings"', defaults)
+		self.assertIn('"name":"egress"', defaults)  # the role env_normal names
+		self.assertNotIn('"name":"full"', defaults)
+		self.assertIn('"object":"DnsResolver"', defaults)
+		self.assertIn('"@type":"RocksDb"', plan.to_ndjson(egress.gateway_bootstrap_plan(self.gateway)))
+		self.assertIn(pool.pool_name, plan.to_ndjson(egress.gateway_recovery_plan(self.gateway)))
 
 	def test_a_failed_ptr_lookup_keeps_the_last_state(self) -> None:
 		pool = self.make_pool()

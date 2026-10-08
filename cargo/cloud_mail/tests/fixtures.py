@@ -46,6 +46,7 @@ def make_cluster(name: str = "blr-1", hostname: str | None = None, multi_node: b
 		{
 			"doctype": "Stalwart Cluster",
 			"title": name,
+			"acme_contact_email": "ops@example.test",
 			"label": label,
 			"regions": regions,
 			"data_store": data.name,

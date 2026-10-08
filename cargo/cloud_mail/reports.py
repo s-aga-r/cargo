@@ -17,7 +17,7 @@ from frappe.model.document import Document
 from frappe.utils import add_days, cint, get_datetime, get_system_timezone, now_datetime
 
 from cargo.cloud_mail.stalwart import get_client, has_credentials
-from cargo.cloud_mail.utils import get_config, log_exception, utc_iso
+from cargo.cloud_mail.utils import log_exception, utc_iso
 
 DEFAULT_RETENTION_DAYS = 90
 
@@ -32,7 +32,7 @@ class ReceivedReports:
 	doctype: str
 	child_doctypes: tuple[str, ...]
 	service: str  # the StalwartClient attribute that lists the objects
-	retention_key: str  # the Suite Cloud config key that holds the retention in days
+	retention_key: str  # the Mail Settings field that holds the retention in days
 
 	def fetch_all_clusters(self) -> None:
 		"""Copies the reports each active cluster holds that are not stored yet.
@@ -100,7 +100,7 @@ class ReceivedReports:
 		number would move the cutoff into the future and delete the whole history.
 		"""
 
-		days = cint(get_config(self.retention_key))
+		days = cint(frappe.get_cached_doc("Mail Settings").get(self.retention_key))
 		return days if days > 0 else DEFAULT_RETENTION_DAYS
 
 	def detach_domain(self, domain: str) -> None:

@@ -33,20 +33,29 @@ class TestStalwartCluster(IntegrationTestCase):
 		self.assertEqual(cluster.coordinator, "Default")
 		self.assertEqual(cluster.status, "Pending")
 		self.assertEqual(len(cluster.get_password("admin_password")), 32)
-		self.assertEqual(
-			cluster.stalwart_version, frappe.db.get_single_value("Mail Settings", "stalwart_version")
-		)
+		self.assertEqual(cluster.stalwart_version, plan.STALWART_VERSION)
 
 	def test_label_names_the_cluster_and_is_handed_out(self) -> None:
 		store = make_store("Data", "PostgreSql", host="db", auth_secret="x")
 		bad = frappe.get_doc(
-			{"doctype": "Stalwart Cluster", "title": "bad", "label": "Bad Label!", "data_store": store.name}
+			{
+				"doctype": "Stalwart Cluster",
+				"title": "bad",
+				"label": "Bad Label!",
+				"data_store": store.name,
+				"acme_contact_email": "ops@example.test",
+			}
 		)
 		self.assertRaisesRegex(frappe.ValidationError, "Label must be", bad.insert)
 
 		remove_cluster(f"mail.c1.{ROOT_DOMAIN}")
 		auto = frappe.get_doc(
-			{"doctype": "Stalwart Cluster", "title": "auto", "data_store": store.name}
+			{
+				"doctype": "Stalwart Cluster",
+				"title": "auto",
+				"data_store": store.name,
+				"acme_contact_email": "ops@example.test",
+			}
 		).insert()
 		self.assertEqual(
 			(auto.label, auto.name, auto.default_domain),
@@ -55,7 +64,13 @@ class TestStalwartCluster(IntegrationTestCase):
 		self.assertEqual(auto.regions, [])  # serves any region
 		self.assertTrue(auto.serves("anything"))
 		dup = frappe.get_doc(
-			{"doctype": "Stalwart Cluster", "title": "dup", "label": "c1", "data_store": store.name}
+			{
+				"doctype": "Stalwart Cluster",
+				"title": "dup",
+				"label": "c1",
+				"data_store": store.name,
+				"acme_contact_email": "ops@example.test",
+			}
 		)
 		self.assertRaisesRegex(frappe.ValidationError, "already used", dup.insert)
 		remove_cluster(auto.name)
@@ -386,11 +401,6 @@ class TestStalwartCluster(IntegrationTestCase):
 			plan.defaults_plan(),
 			[operations["ClusterRole"], operations["DnsResolver"], operations["SpamSettings"]],
 		)
-
-		configure_settings(spam_filter_rules_version="")
-		self.addCleanup(configure_settings)
-		# Stalwart's own default: the latest release
-		self.assertEqual([op["object"] for op in plan.defaults_plan()], ["ClusterRole", "DnsResolver"])
 
 		configure_settings(sign_with_ed25519=1)
 		self.addCleanup(configure_settings, sign_with_ed25519=0)

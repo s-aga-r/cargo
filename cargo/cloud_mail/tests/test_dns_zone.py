@@ -11,7 +11,6 @@ from cargo.cloud_mail.tests.fixtures import (
 	make_zone,
 	remove_cluster,
 )
-from cargo.cloud_mail.utils import get_config
 
 # Unique to the tests so a site's own records never collide with them.
 TEST_HOST = "suite-cloud-test"
@@ -52,13 +51,9 @@ class TestDNSZone(IntegrationTestCase):
 		self.assertEqual(record.dns_zone, ROOT_DOMAIN)
 		self.assertEqual(record.fqdn, f"{TEST_HOST}.{ROOT_DOMAIN}")
 
-	def test_zone_ttl_wins_over_settings(self) -> None:
+	def test_zone_ttl_is_the_record_default(self) -> None:
 		make_zone(default_ttl=60)
 		self.assertEqual(make_dns_record().ttl, 60)
-
-		make_zone(default_ttl=0)
-		frappe.db.delete("DNS Record", {"host": TEST_HOST})
-		self.assertEqual(make_dns_record().ttl, cint(get_config("default_dns_ttl")))
 
 	def test_same_record_may_exist_in_two_zones(self) -> None:
 		make_zone(OTHER_ZONE, is_default=0)

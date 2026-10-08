@@ -1,68 +1,8 @@
-import functools
 import re
-from collections.abc import Callable, Generator
-from contextlib import contextmanager
-from typing import Any
 
 import frappe
 from frappe import _
 from frappe.utils import cint
-from frappe.utils.caching import request_cache
-
-CONFIG_KEYS = (
-	"default_dns_ttl",
-	"public_url",
-	"site_service_user",
-	"stalwart_version",
-	"stalwart_cli_version",
-	"stalwart_download_url_template",
-	"stalwart_cli_download_url_template",
-	"spam_filter_rules_version",
-	"acme_directory_url",
-	"acme_contact_email",
-	"sign_with_ed25519",
-	"skip_domain_verification",
-	"dmarc_report_retention_days",
-	"tls_report_retention_days",
-)
-
-
-@request_cache
-def get_config(key: str | tuple[str, ...] | None = None) -> dict[str, Any] | tuple | Any:
-	"""Fetches configuration values, prioritizing Mail Settings over the site config.
-
-	The site config fallback is the ``suite_cloud`` dict in ``site_config.json``. Cached per
-	request: the returned dict is shared, so callers must treat it as read-only.
-	"""
-
-	site_conf = frappe.conf.suite_cloud or {}
-	settings = frappe.get_cached_doc("Mail Settings")
-	config = {}
-	for field in CONFIG_KEYS:
-		value = settings.get(field)
-		# Only an unset value falls through, so a deliberate 0 in settings still wins.
-		config[field] = site_conf.get(field) if value in (None, "") else value
-
-	if not key:
-		return config
-
-	keys = (key,) if isinstance(key, str) else key
-	for k in keys:
-		if k not in config:
-			frappe.throw(_("Suite Cloud config key '{0}' not found").format(k))
-
-	return tuple(config[k] for k in keys) if len(keys) > 1 else config[keys[0]]
-
-
-def clear_config_cache() -> None:
-	"""Forgets what get_config has read, so a change to Mail Settings is seen within the
-	request that saved it: Frappe clears the document's own cache only once its hooks have run,
-	and get_config keeps its answer for the rest of the request besides."""
-
-	frappe.clear_document_cache("Mail Settings", "Mail Settings")
-	cache = getattr(frappe.local, "request_cache", None)
-	if cache is not None:
-		cache.pop(get_config.__wrapped__, None)
 
 
 def dkim_algorithms() -> tuple[str, ...]:
@@ -73,13 +13,8 @@ def dkim_algorithms() -> tuple[str, ...]:
 
 	from cargo.cloud_mail.stalwart.directory import DKIM_ED25519, DKIM_RSA
 
-	return (DKIM_ED25519, DKIM_RSA) if cint(get_config("sign_with_ed25519")) else (DKIM_RSA,)
-
-
-def get_public_url() -> str:
-	"""Returns the URL other systems use to reach this Suite Cloud site."""
-
-	return (get_config("public_url") or frappe.utils.get_url()).rstrip("/")
+	settings = frappe.get_cached_doc("Mail Settings")
+	return (DKIM_ED25519, DKIM_RSA) if cint(settings.sign_with_ed25519) else (DKIM_RSA,)
 
 
 def utc_iso(value) -> str | None:
@@ -106,16 +41,6 @@ def password_or_none(doc, field: str) -> str | None:
 	return doc.get_password(field) if doc.get(field) else None
 
 
-def log_error(title: str | None = None, message: str | None = None, **kwargs) -> None:
-	"""Logs an error, prefixing the title with "[Suite Cloud]" so these errors can be filtered out."""
-
-	prefix = "[Suite Cloud] "
-	if title and not title.startswith(prefix):
-		title = f"{prefix}{title}"
-
-	frappe.log_error(title=title, message=message, **kwargs)
-
-
 def log_exception(title: str, doc=None) -> None:
 	"""The current exception's traceback, without local variables.
 
@@ -124,53 +49,12 @@ def log_exception(title: str, doc=None) -> None:
 	what is needed to find the fault.
 	"""
 
-	prefix = "[Suite Cloud] "
-	if not title.startswith(prefix):
-		title = f"{prefix}{title}"
 	frappe.log_error(
 		title=title,
 		message=frappe.get_traceback(),
 		reference_doctype=doc.doctype if doc is not None else None,
 		reference_name=doc.name if doc is not None else None,
 	)
-
-
-def enqueue_job(
-	method: str | Callable, job_id: str | None = None, deduplicate: bool = False, **kwargs
-) -> None:
-	"""Enqueues a background job, deriving a stable job id when deduplicating."""
-
-	if deduplicate and not job_id:
-		job_id = method.split(".")[-1] if isinstance(method, str) else method.__name__
-
-	frappe.enqueue(method, job_id=job_id, deduplicate=deduplicate, **kwargs)
-
-
-@contextmanager
-def user_context(user: str) -> Generator[None]:
-	"""Temporarily switches the session user."""
-
-	session_user = frappe.session.user
-	session_sid = frappe.session.sid
-	session_data = frappe.session.data.copy()
-	form_dict = frappe.local.form_dict
-
-	if session_user == user:
-		yield
-		return
-
-	try:
-		frappe.set_user(user)
-		yield
-	finally:
-		# frappe.set_user() overwrites session.sid with the username and wipes session.data and
-		# form_dict, so restore all three alongside the user to avoid corrupting the original
-		# session. form_dict matters beyond tidiness: rate limiting keys its counter off
-		# form_dict.cmd, so leaving it emptied silently unlimits the rest of the request.
-		frappe.set_user(session_user)
-		frappe.session.sid = session_sid
-		frappe.session.data = session_data
-		frappe.local.form_dict = form_dict
 
 
 def child_rows(doctype: str, parenttype: str, parents: list[str], fields: list[str]) -> dict[str, list]:

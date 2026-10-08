@@ -16,7 +16,6 @@ import frappe
 from frappe import _
 from frappe.utils import cint
 
-from cargo.cloud_mail.utils import get_config
 from cargo.dns.resolver import verify_dns_record
 
 VALUE_PREFIX = "frappe-suite-verification="
@@ -38,13 +37,17 @@ def required() -> bool:
 	"""Whether the request has to prove control of the domain: a site's own, on a cloud that
 	checks."""
 
-	return frappe.session.user == get_config("site_service_user") and not skipped()
+	return frappe.session.user == settings().site_service_user and not skipped()
 
 
 def skipped() -> bool:
 	"""Whether this cloud takes tenants' word for their domains (Mail Settings)."""
 
-	return bool(cint(get_config("skip_domain_verification")))
+	return bool(cint(settings().skip_domain_verification))
+
+
+def settings():
+	return frappe.get_cached_doc("Mail Settings")
 
 
 def assert_ownership(site, domain_name: str) -> None:

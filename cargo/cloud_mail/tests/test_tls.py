@@ -299,8 +299,8 @@ class TestTlsReports(SiteApiTestCase):
 		frappe.db.set_value("TLS Report", gone_name, "expires_at", add_days(NOW, -1))
 
 		def retention(days: int):
-			config = {"tls_report_retention_days": days}
-			return patch("cargo.cloud_mail.reports.get_config", side_effect=config.get)
+			frappe.db.set_single_value("Mail Settings", "tls_report_retention_days", days)
+			return patch.object(TLS_REPORTS, "retention_key", "tls_report_retention_days")
 
 		with retention(365):
 			TLS_REPORTS.prune_expired()

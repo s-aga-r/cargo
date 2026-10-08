@@ -74,7 +74,6 @@ class TestMailSite(TenancyTestCase):
 		self.assertEqual(len(self.site.api_key), 32)
 		self.assertEqual(len(self.site.new_secret), 40)
 		self.assertEqual(self.site.get_password("api_secret"), self.site.new_secret)
-		self.assertEqual(self.site.user, "suite-site@suite-cloud.internal")
 		self.assertEqual(self.site.status, "Active")
 		self.assertEqual(self.site.to_api()["jmap_url"], self.cluster.base_url)
 

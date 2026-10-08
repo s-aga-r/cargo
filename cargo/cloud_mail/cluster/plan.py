@@ -16,11 +16,14 @@ import frappe
 
 from cargo.cloud_mail.stalwart.client import is_write_only
 from cargo.cloud_mail.stalwart.directory import dkim_management_payload
-from cargo.cloud_mail.utils import dkim_algorithms, get_config
+from cargo.cloud_mail.utils import dkim_algorithms
 
 if TYPE_CHECKING:
 	from frappe.model.document import Document
 
+STALWART_VERSION = "v0.16.20"
+SPAM_FILTER_RULES_VERSION = "v3.0.1"
+ACME_DIRECTORY_URL = "https://acme-v02.api.letsencrypt.org/directory"
 BOOTSTRAP_PORT = 8080
 API_KEY_DESCRIPTION = "suite-cloud"
 DISABLED_ROLE_DESCRIPTION = "suite-disabled"
@@ -229,9 +232,9 @@ def cluster_plan(cluster: Document) -> list[dict]:
 
 
 def acme_provider(cluster: Document) -> dict:
-	contact = cluster.acme_contact_email or get_config("acme_contact_email")
+	contact = cluster.acme_contact_email
 	provider = {
-		"directory": cluster.acme_directory_url or get_config("acme_directory_url"),
+		"directory": cluster.acme_directory_url or ACME_DIRECTORY_URL,
 		"challengeType": "Dns01",
 	}
 	if contact:
@@ -343,14 +346,11 @@ def spam_settings_operations() -> list[dict]:
 	so the pin must be in place before it.
 	"""
 
-	version = get_config("spam_filter_rules_version")
-	if not version:
-		return []
 	return [
 		{
 			"@type": "update",
 			"object": "SpamSettings",
-			"value": {"spamFilterRulesUrl": SPAM_RULES_URL.format(version=version)},
+			"value": {"spamFilterRulesUrl": SPAM_RULES_URL.format(version=SPAM_FILTER_RULES_VERSION)},
 		}
 	]
 
