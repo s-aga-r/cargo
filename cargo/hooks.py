@@ -253,6 +253,11 @@ after_install = "cargo.install.after_install"
 # Automatically update python controller files with type annotations for this app.
 export_python_type_annotations = True
 
+# Whitelisted methods take JSON bodies natively and must annotate every argument, as
+# Suite Cloud's did; every Cargo method already does.
+use_json_request_body = True
+require_type_annotated_api_methods = True
+
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
