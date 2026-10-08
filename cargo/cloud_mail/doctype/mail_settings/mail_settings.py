@@ -9,6 +9,7 @@ from frappe.utils import cint
 from cargo.cloud_mail.reports import DEFAULT_RETENTION_DAYS
 
 DEFAULT_DOMAIN_RETENTION_DAYS = 90
+DEFAULT_OWNERSHIP_MISS_LIMIT = 7
 
 
 class MailSettings(Document):
@@ -22,6 +23,7 @@ class MailSettings(Document):
 
 		disabled_domain_retention_days: DF.Int
 		dmarc_report_retention_days: DF.Int
+		ownership_miss_limit: DF.Int
 		sign_with_ed25519: DF.Check
 		site_service_user: DF.Link | None
 		skip_domain_verification: DF.Check
@@ -32,6 +34,7 @@ class MailSettings(Document):
 	def validate(self) -> None:
 		self.validate_report_retention()
 		self.validate_retention("disabled_domain_retention_days", DEFAULT_DOMAIN_RETENTION_DAYS)
+		self.validate_retention("ownership_miss_limit", DEFAULT_OWNERSHIP_MISS_LIMIT)
 
 	def on_update(self) -> None:
 		before = self.get_doc_before_save()
@@ -48,8 +51,8 @@ class MailSettings(Document):
 
 	def validate_retention(self, field: str, default: int) -> None:
 		# A site set up before a field existed has it empty: the default applies rather than a
-		# refusal to save anything else. An explicit value under a day is still a mistake.
+		# refusal to save anything else. An explicit value under one is still a mistake.
 		if self.get(field) in (None, ""):
 			self.set(field, default)
 		elif cint(self.get(field)) < 1:
-			frappe.throw(_("{0} must be at least one day.").format(_(self.meta.get_label(field))))
+			frappe.throw(_("{0} must be at least 1.").format(_(self.meta.get_label(field))))

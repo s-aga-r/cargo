@@ -27,6 +27,8 @@
   "skip_scheduled_verification",
   "verification_skipped",
   "last_verified_at",
+  "ownership_misses",
+  "ownership_misses",
   "column_break_dns",
   "last_refreshed_at",
   "dns_records_section",
@@ -189,6 +191,20 @@
    "fieldname": "last_verified_at",
    "fieldtype": "Datetime",
    "label": "Last Verified At",
+   "read_only": 1
+  },
+  {
+   "description": "Daily checks in a row that found the ownership record gone.",
+   "fieldname": "ownership_misses",
+   "fieldtype": "Int",
+   "label": "Ownership Misses",
+   "read_only": 1
+  },
+  {
+   "description": "Daily checks in a row that found the ownership record gone.",
+   "fieldname": "ownership_misses",
+   "fieldtype": "Int",
+   "label": "Ownership Misses",
    "read_only": 1
   },
   {

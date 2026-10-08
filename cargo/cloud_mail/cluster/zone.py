@@ -20,10 +20,10 @@ GROUPS = (
 		"key": "authentication_records",
 		"label": "Email Authentication",
 		"is_mandatory": True,
-		"categories": ("SPF", "DKIM", "DMARC"),
+		"categories": ("Ownership", "SPF", "DKIM", "DMARC"),
 		"description": (
-			"Records that stop others sending mail as this domain: SPF, DKIM and DMARC. "
-			"Mail flows once SPF, DMARC and at least one DKIM selector resolve."
+			"Records that prove this domain is yours and stop others sending mail as it: the "
+			"ownership record, SPF, DKIM and DMARC. Mail flows once all but one DKIM selector resolve."
 		),
 	},
 	{
@@ -105,16 +105,36 @@ def parse_zone_file(text: str) -> list[ZoneRecord]:
 	return records
 
 
+def ownership_row(value: str, default_ttl: int = 300) -> dict:
+	"""The TXT record a site publishes to prove control of a domain, kept with the other
+	mandatory rows so the daily check sees it lapse."""
+
+	return {
+		"record_type": "TXT",
+		"host": "@",
+		"ttl": default_ttl,
+		"priority": 0,
+		"weight": 0,
+		"port": 0,
+		"value": value,
+		"category": "Ownership",
+		"group": "authentication_records",
+		"is_mandatory": 1,
+	}
+
+
 def build_domain_records(
 	domain: str,
 	zone_file: str,
 	spf_include: str,
 	include_client_discovery: bool = False,
 	default_ttl: int = 300,
+	extra_rows: list[dict] | None = None,
 ) -> list[dict]:
-	"""Rows for Mail Domain DNS Record, each carrying its ``group`` key, in group order."""
+	"""Rows for Mail Domain DNS Record, each carrying its ``group`` key, in group order.
+	``extra_rows`` are rows the zone file cannot know about, such as the ownership proof."""
 
-	rows = []
+	rows = list(extra_rows or [])
 	for record in parse_zone_file(zone_file):
 		row = _to_row(record, domain, spf_include, default_ttl)
 		if row is None:

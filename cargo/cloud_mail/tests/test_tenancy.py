@@ -159,9 +159,17 @@ class TestMailDomain(TenancyTestCase):
 		# Rows land in the table of their group; authentication rows are the mandatory ones.
 		auth = [(r.category, r.host, r.is_mandatory) for r in domain.authentication_records]
 		self.assertEqual(
-			auth, [("SPF", "@", 1), ("DKIM", "frappemail-rsa._domainkey", 1), ("DMARC", "_dmarc", 1)]
+			auth,
+			[
+				("Ownership", "@", 1),
+				("SPF", "@", 1),
+				("DKIM", "frappemail-rsa._domainkey", 1),
+				("DMARC", "_dmarc", 1),
+			],
 		)
-		spf = domain.authentication_records[0]
+		proof = domain.authentication_records[0]
+		self.assertEqual(proof.value, f"frappe-suite-verification={self.site.domain_verification_token}")
+		spf = domain.authentication_records[1]
 		self.assertEqual(spf.value, f"v=spf1 include:spf.{self.cluster.default_domain} -all")
 		mx = domain.routing_records[0]
 		self.assertEqual(
@@ -958,6 +966,42 @@ class TestMailAccount(TenancyTestCase):
 		self.assertFalse(frappe.db.exists("Mail Group Member", {"group": "sales@acme.com"}))
 		self.assertIsNone(self.fake.get("Account", self.group.stalwart_id))
 		self.assertEqual(self.fake.get("Account", account.stalwart_id)["memberGroupIds"], {})
+
+
+class TestOwnership(TenancyTestCase):
+	def test_a_domain_is_verified_only_with_its_ownership_record(self) -> None:
+		domain = self.make_domain(is_verified=0)
+		for row in domain.authentication_records:
+			row.is_verified = int(row.category != "Ownership")
+		self.assertFalse(domain.compute_is_verified())
+		next(r for r in domain.authentication_records if r.category == "Ownership").is_verified = 1
+		self.assertTrue(domain.compute_is_verified())
+
+	def test_ownership_is_rechecked_daily_and_lapses_at_the_limit(self) -> None:
+		from cargo.cloud_mail.doctype.mail_domain.mail_domain import reverify_ownership
+
+		frappe.db.set_single_value("Mail Settings", "ownership_miss_limit", 2)
+		domain = self.make_domain()
+		target = "cargo.cloud_mail.tenancy.ownership.verify_dns_record"
+
+		with patch(target, return_value=None):
+			reverify_ownership()  # resolvers down: nothing is counted
+		with patch(target, return_value=False):
+			reverify_ownership()
+		domain.reload()
+		self.assertEqual((domain.enabled, domain.ownership_misses), (1, 1))
+
+		with patch(target, return_value=True):
+			reverify_ownership()  # the record is back: the count starts over
+		self.assertEqual(frappe.db.get_value("Mail Domain", domain.name, "ownership_misses"), 0)
+
+		with patch(target, return_value=False):
+			reverify_ownership()
+			reverify_ownership()
+		domain.reload()
+		self.assertEqual((domain.enabled, domain.is_verified, domain.ownership_misses), (0, 0, 2))
+		self.assertIn("ownership record was missing", domain.disabled_reason)
+		self.assertFalse(self.fake.find("Domain", name="acme.com")["isEnabled"])
 
 
 class TestRetention(TenancyTestCase):

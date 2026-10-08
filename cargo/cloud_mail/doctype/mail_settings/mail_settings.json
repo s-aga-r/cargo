@@ -14,6 +14,7 @@
   "dmarc_report_retention_days",
   "tls_report_retention_days",
   "disabled_domain_retention_days",
+  "ownership_miss_limit",
   "dkim_section",
   "sign_with_ed25519"
  ],
@@ -79,6 +80,14 @@
    "fieldname": "disabled_domain_retention_days",
    "fieldtype": "Int",
    "label": "Disabled Domain Retention (Days)",
+   "non_negative": 1
+  },
+  {
+   "default": "7",
+   "description": "Daily checks in a row that may find a domain's ownership record gone before the domain is disabled.",
+   "fieldname": "ownership_miss_limit",
+   "fieldtype": "Int",
+   "label": "Ownership Miss Limit",
    "non_negative": 1
   },
   {

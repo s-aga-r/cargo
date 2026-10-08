@@ -9,7 +9,7 @@ from frappe.utils import add_days, cint, now, now_datetime
 from cargo.cargo.doctype.dns_zone.dns_zone import DEFAULT_TTL
 from cargo.cloud_mail.cluster import dns as cluster_dns
 from cargo.cloud_mail.cluster import egress
-from cargo.cloud_mail.cluster.zone import GROUPS, build_domain_records, group_summaries
+from cargo.cloud_mail.cluster.zone import GROUPS, build_domain_records, group_summaries, ownership_row
 from cargo.cloud_mail.doctype.dmarc_report.dmarc_report import DMARC_REPORTS
 from cargo.cloud_mail.doctype.stalwart_cluster.stalwart_cluster import region_cluster
 from cargo.cloud_mail.doctype.tls_report.tls_report import TLS_REPORTS
@@ -67,6 +67,7 @@ class MailDomain(Document):
 		is_verified: DF.Check
 		last_refreshed_at: DF.Datetime | None
 		last_verified_at: DF.Datetime | None
+		ownership_misses: DF.Int
 		publish_client_discovery_records: DF.Check
 		routing_records: DF.Table[MailDomainDNSRecord]
 		site: DF.Link
@@ -237,6 +238,7 @@ class MailDomain(Document):
 		"""Replaces the group tables with the rows parsed from ``zone_file`` (verification kept)."""
 
 		cluster = self.get_cluster()
+		site = self.get_site()
 		rows = build_domain_records(
 			self.domain_name,
 			zone_file,
@@ -244,6 +246,9 @@ class MailDomain(Document):
 			include_client_discovery=bool(self.publish_client_discovery_records),
 			default_ttl=cint(frappe.get_cached_value("DNS Zone", cluster.dns_zone, "default_ttl"))
 			or DEFAULT_TTL,
+			extra_rows=[ownership_row(ownership.ownership_record(site, self.domain_name)["value"])]
+			if site
+			else None,
 		)
 		verified = {
 			(r.record_type, r.host, (r.value or "").strip()): r for r in self.dns_rows() if r.is_verified
@@ -299,6 +304,9 @@ class MailDomain(Document):
 		for category in ("SPF", "DMARC"):
 			if not by_category.get(category) or not all(r.is_verified for r in by_category[category]):
 				return False
+		# Present only on a site's domain; a domain nobody owns has nobody to prove anything.
+		if not all(r.is_verified for r in by_category.get("Ownership", [])):
+			return False
 		return any(r.is_verified for r in by_category.get("DKIM", []))
 
 	def dns_rows(self) -> list[Document]:
@@ -541,3 +549,41 @@ def purge_domain(name: str) -> None:
 		for doc_name in frappe.get_all(doctype, {"domain": name}, pluck="name"):
 			frappe.delete_doc(doctype, doc_name, ignore_permissions=True)
 	frappe.delete_doc("Mail Domain", name, ignore_permissions=True)
+
+
+def reverify_ownership() -> None:
+	"""Daily: a verified domain stays a site's only while its ownership record stays published.
+
+	One miss is a DNS change in progress; the limit from Mail Settings is where it becomes a
+	domain the site no longer controls, and the domain is disabled with that on record. An
+	inconclusive lookup counts for nothing either way."""
+
+	limit = cint(frappe.get_cached_doc("Mail Settings").ownership_miss_limit)
+	due = {
+		"enabled": 1,
+		"is_verified": 1,
+		"site": ["is", "set"],
+		"skip_scheduled_verification": 0,
+		"verification_skipped": 0,
+	}
+	for name in frappe.get_all("Mail Domain", due, pluck="name"):
+		_run_isolated(name, lambda: _recheck_ownership(name, limit), "Ownership check")
+
+
+def _recheck_ownership(name: str, limit: int) -> None:
+	domain = frappe.get_doc("Mail Domain", name, for_update=True)
+	verified = ownership.verify_ownership(domain.get_site(), domain.domain_name)
+	if verified is None:
+		return
+	if verified:
+		if domain.ownership_misses:
+			domain.db_set("ownership_misses", 0, update_modified=False)
+		return
+	misses = cint(domain.ownership_misses) + 1
+	if misses < limit:
+		domain.db_set("ownership_misses", misses, update_modified=False)
+		return
+	domain.ownership_misses = misses
+	domain.enabled = 0
+	domain.disabled_reason = _("The ownership record was missing on {0} daily checks.").format(misses)
+	domain.save(ignore_permissions=True)
