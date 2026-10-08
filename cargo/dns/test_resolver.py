@@ -5,7 +5,7 @@ from unittest.mock import patch
 import dns.exception
 import dns.resolver
 from frappe.tests import UnitTestCase
-from suite_cloud.dns import resolver
+from cargo.dns import resolver
 
 CLOUDFLARE, GOOGLE_2, GOOGLE_1, QUAD9 = resolver.NAMESERVERS
 IP = "165.232.179.70"
