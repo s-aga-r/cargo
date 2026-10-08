@@ -12,6 +12,7 @@
   "column_break_main",
   "enabled",
   "disable_receiving",
+  "is_platform_address",
   "display_name",
   "description",
   "stalwart_id",
@@ -94,6 +95,13 @@
    "fieldname": "disable_receiving",
    "fieldtype": "Check",
    "label": "Disable Receiving"
+  },
+  {
+   "description": "The send-only address Cargo gives every site on the region's own domain.",
+   "fieldname": "is_platform_address",
+   "fieldtype": "Check",
+   "label": "Is Platform Address",
+   "read_only": 1
   },
   {
    "description": "Name shown to other users, e.g. Alice Doe. This is the only text sent to the cluster for the account.",

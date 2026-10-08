@@ -19,6 +19,8 @@ from cargo.cloud_mail.tenancy.addresses import (
 	assert_addresses_deliverable,
 	assert_domain_available,
 	assert_domain_not_reserved,
+	assert_receiving_allowed,
+	receiving_allowed,
 	validate_domain_name,
 	validate_email_address,
 )
@@ -59,6 +61,7 @@ class MailDomain(Document):
 		domain_name: DF.Data
 		egress_pool: DF.Link | None
 		enabled: DF.Check
+		holds_mailboxes: DF.Check
 		is_verified: DF.Check
 		last_refreshed_at: DF.Datetime | None
 		last_verified_at: DF.Datetime | None
@@ -95,6 +98,14 @@ class MailDomain(Document):
 					ownership.assert_ownership(site, self.domain_name)
 				assert_domain_available(self.domain_name, self.site)
 				site.assert_can_add_domain()
+		if not self.holds_mailboxes:
+			# Mail for the domain belongs where its mailboxes are, so what lands here is passed on.
+			self.allow_relaying = 1
+		if not receiving_allowed(self.site, self):
+			# Nothing lands here, so there is nothing for a tag to route; a catch-all is a mistake.
+			self.sub_addressing = 0
+			if self.catch_all_address:
+				assert_receiving_allowed(self.site, self)
 		if self.catch_all_address:
 			self.catch_all_address = validate_email_address(self.catch_all_address)
 			assert_addresses_deliverable(self.site, [self.catch_all_address])

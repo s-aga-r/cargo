@@ -925,6 +925,46 @@ class TestMailAccount(TenancyTestCase):
 		self.assertEqual(self.fake.get("Account", account.stalwart_id)["memberGroupIds"], {})
 
 
+class TestEntitlement(TenancyTestCase):
+	def test_a_site_without_mailboxes_only_sends(self) -> None:
+		self.site.db_set("mailboxes_allowed", 0)
+		frappe.clear_document_cache("Mail Site", self.site.name)
+		domain = self.make_domain()
+
+		account = self.make_account("sender@acme.com")
+		self.assertTrue(account.disable_receiving)
+		self.assertTrue(self.fake.get("Account", account.stalwart_id))
+		for doctype, email in (("Mail Group", "team@acme.com"), ("Mailing List", "all@acme.com")):
+			doc = frappe.get_doc({"doctype": doctype, "email": email, "site": self.site.name})
+			self.assertRaisesRegex(frappe.ValidationError, "Mailboxes are not available", doc.insert)
+		domain.catch_all_address = "inbox@acme.com"
+		self.assertRaisesRegex(frappe.ValidationError, "Mailboxes are not available", domain.save)
+
+	def test_a_domain_whose_mailboxes_live_elsewhere_relays(self) -> None:
+		domain = self.make_domain(holds_mailboxes=0)
+		self.assertTrue(domain.allow_relaying)
+		self.assertTrue(self.fake.find("Domain", name="acme.com")["allowRelaying"])
+		self.assertTrue(self.make_account("sender@acme.com").disable_receiving)
+		group = frappe.get_doc({"doctype": "Mail Group", "email": "team@acme.com", "site": self.site.name})
+		self.assertRaisesRegex(frappe.ValidationError, "Mailboxes are not available", group.insert)
+
+	def test_an_account_on_a_shared_domain_belongs_to_the_site_that_made_it(self) -> None:
+		frappe.get_doc(
+			{
+				"doctype": "Mail Domain",
+				"domain_name": "shared.example",
+				"is_verified": 1,
+				"holds_mailboxes": 0,
+			}
+		).insert()
+		account = self.make_account("acme@shared.example")
+		self.assertEqual((account.site, account.domain), (self.site.name, "shared.example"))
+		self.assertTrue(account.disable_receiving)
+		homeless = frappe.get_doc({"doctype": "Mail Account", "email": "nobody@shared.example"})
+		homeless.flags.password = "secret-pw"
+		self.assertRaisesRegex(frappe.ValidationError, "needs a site", homeless.insert)
+
+
 class TestMailingList(TenancyTestCase):
 	def test_mailing_list_recipients_and_aliases(self) -> None:
 		self.make_domain()

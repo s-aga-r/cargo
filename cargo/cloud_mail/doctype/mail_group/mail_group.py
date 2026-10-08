@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, flt
 
@@ -10,7 +11,8 @@ from cargo.cloud_mail.tenancy import quotas, sync
 from cargo.cloud_mail.tenancy.addresses import (
 	assert_address_available,
 	assert_domain_live,
-	get_site_domain,
+	assert_receiving_allowed,
+	resolve_domain,
 	validate_email_address,
 )
 from cargo.cloud_mail.tenancy.quotas import QuotaHolder
@@ -46,14 +48,15 @@ class MailGroup(QuotaHolder, Document):
 
 	def validate(self) -> None:
 		self.email = validate_email_address(self.email)
-		domain = get_site_domain(self.site, self.email.split("@", 1)[1]) if self.site else None
-		if domain is None:
-			domain = frappe.get_cached_doc("Mail Domain", self.email.split("@", 1)[1])
+		domain = resolve_domain(self.site, self.email)
 		self.domain = domain.name
-		self.site = domain.site
+		self.site = domain.site or self.site
+		if not self.site:
+			frappe.throw(_("A {0} on a domain nobody owns needs a site.").format(_(self.doctype)))
 		self.cluster = domain.cluster
 		if self.is_new() and not self.flags.adopting:
 			assert_domain_live(domain)
+			assert_receiving_allowed(self.site, domain)
 		site = frappe.get_cached_doc("Mail Site", self.site)
 		if self.is_new() and not self.flags.adopting:
 			site.assert_can_add_group()

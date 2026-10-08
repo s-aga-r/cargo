@@ -59,6 +59,39 @@ def get_site_domain(site: str, domain_name: str):
 	return domain
 
 
+def resolve_domain(site: str | None, email: str):
+	"""The domain an address sits on: the site's own, or one nobody owns. Another site's is
+	invisible (404)."""
+
+	domain_name = email.split("@", 1)[1]
+	domain = (
+		frappe.get_cached_doc("Mail Domain", domain_name)
+		if frappe.db.exists("Mail Domain", domain_name)
+		else None
+	)
+	if domain is None or (domain.site and domain.site != site):
+		frappe.throw(
+			_("Domain {0} does not belong to this site.").format(domain_name), frappe.DoesNotExistError
+		)
+	return domain
+
+
+def receiving_allowed(site: str | None, domain) -> bool:
+	"""Whether mail may land here: the site is entitled to mailboxes and this region holds the
+	domain's. Without a site only the domain decides."""
+
+	if not domain.holds_mailboxes:
+		return False
+	return not site or bool(frappe.get_cached_value("Mail Site", site, "mailboxes_allowed"))
+
+
+def assert_receiving_allowed(site: str | None, domain) -> None:
+	"""Groups, lists and catch-alls exist to receive, so a site that cannot gets none."""
+
+	if not receiving_allowed(site, domain):
+		frappe.throw(_("Mailboxes are not available on {0} for this site.").format(domain.domain_name))
+
+
 def assert_domain_live(domain) -> None:
 	"""Accounts, groups and lists are created only on a domain that is enabled and verified."""
 

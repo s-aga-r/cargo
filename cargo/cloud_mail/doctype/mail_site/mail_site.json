@@ -19,6 +19,7 @@
   "max_accounts",
   "max_groups",
   "max_mailing_lists",
+  "mailboxes_allowed",
   "column_break_limits",
   "egress_pool",
   "max_disk_gb",
@@ -135,6 +136,13 @@
    "fieldname": "max_mailing_lists",
    "fieldtype": "Int",
    "label": "Max Mailing Lists"
+  },
+  {
+   "default": "1",
+   "description": "Off for a site that only sends: its accounts cannot receive, and it gets no groups or lists.",
+   "fieldname": "mailboxes_allowed",
+   "fieldtype": "Check",
+   "label": "Mailboxes Allowed"
   },
   {
    "fieldname": "column_break_limits",

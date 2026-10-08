@@ -17,7 +17,8 @@ from cargo.cloud_mail.tenancy import quotas, sync
 from cargo.cloud_mail.tenancy.addresses import (
 	assert_address_available,
 	assert_domain_live,
-	get_site_domain,
+	receiving_allowed,
+	resolve_domain,
 	validate_email_address,
 )
 from cargo.cloud_mail.tenancy.quotas import QuotaHolder
@@ -53,6 +54,7 @@ class MailAccount(QuotaHolder, Document):
 		domain: DF.Link | None
 		email: DF.Data
 		enabled: DF.Check
+		is_platform_address: DF.Check
 		groups: DF.TableMultiSelect[MailGroupMember]
 		locale: DF.Data | None
 		new_password: DF.Password | None
@@ -71,14 +73,16 @@ class MailAccount(QuotaHolder, Document):
 
 	def validate(self) -> None:
 		self.email = validate_email_address(self.email)
-		domain = get_site_domain(self.site, self.email.split("@", 1)[1]) if self.site else None
-		if domain is None:
-			domain = frappe.get_cached_doc("Mail Domain", self.email.split("@", 1)[1])
+		domain = resolve_domain(self.site, self.email)
 		self.domain = domain.name
-		self.site = domain.site
+		self.site = domain.site or self.site
+		if not self.site:
+			frappe.throw(_("An account on a domain nobody owns needs a site."))
 		self.cluster = domain.cluster
 		if self.is_new() and not self.flags.adopting:
 			assert_domain_live(domain)
+		if not receiving_allowed(self.site, domain):
+			self.disable_receiving = 1
 		# Stalwart wants BCP 47 tags; POSIX-style names are a common slip.
 		self.locale = (self.locale or "en-US").replace("_", "-")
 

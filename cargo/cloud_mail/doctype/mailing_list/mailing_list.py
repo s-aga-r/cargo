@@ -13,7 +13,8 @@ from cargo.cloud_mail.tenancy.addresses import (
 	assert_address_available,
 	assert_addresses_deliverable,
 	assert_domain_live,
-	get_site_domain,
+	assert_receiving_allowed,
+	resolve_domain,
 	validate_email_address,
 )
 from cargo.cloud_mail.utils import alias_payloads, child_rows, utc_iso
@@ -60,14 +61,15 @@ class MailingList(Document):
 
 	def validate(self) -> None:
 		self.email = validate_email_address(self.email)
-		domain = get_site_domain(self.site, self.email.split("@", 1)[1]) if self.site else None
-		if domain is None:
-			domain = frappe.get_cached_doc("Mail Domain", self.email.split("@", 1)[1])
+		domain = resolve_domain(self.site, self.email)
 		self.domain = domain.name
-		self.site = domain.site
+		self.site = domain.site or self.site
+		if not self.site:
+			frappe.throw(_("A {0} on a domain nobody owns needs a site.").format(_(self.doctype)))
 		self.cluster = domain.cluster
 		if self.is_new() and not self.flags.adopting:
 			assert_domain_live(domain)
+			assert_receiving_allowed(self.site, domain)
 			frappe.get_cached_doc("Mail Site", self.site).assert_can_add_mailing_list()
 		assert_address_available(self.email, exclude=(self.doctype, self.name))
 		sync.validate_aliases(self)

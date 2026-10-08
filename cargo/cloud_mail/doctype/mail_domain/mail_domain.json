@@ -16,6 +16,7 @@
   "catch_all_address",
   "sub_addressing",
   "allow_relaying",
+  "holds_mailboxes",
   "column_break_settings",
   "publish_client_discovery_records",
   "egress_pool",
@@ -117,6 +118,13 @@
    "fieldname": "allow_relaying",
    "fieldtype": "Check",
    "label": "Allow Relaying"
+  },
+  {
+   "default": "1",
+   "description": "Off when another region holds this domain's mailboxes: accounts here only send, and mail for the domain is relayed to its MX.",
+   "fieldname": "holds_mailboxes",
+   "fieldtype": "Check",
+   "label": "Holds Mailboxes"
   },
   {
    "fieldname": "column_break_settings",

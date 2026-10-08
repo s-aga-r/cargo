@@ -41,6 +41,7 @@ class MailSite(Document):
 		max_disk_gb: DF.Float
 		max_domains: DF.Int
 		max_groups: DF.Int
+		mailboxes_allowed: DF.Check
 		max_mailing_lists: DF.Int
 		site_name: DF.Data
 		title: DF.Data | None
