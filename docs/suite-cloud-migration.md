@@ -70,16 +70,16 @@ Tracks A, B, C, D1 and G start in phase 0 together. C and G are the critical pat
 
 | Suite Cloud | Cargo | Change |
 |---|---|---|
-| `cloud_mail/` (module Cloud Mail) | `cargo/cloud_mail/` (module Mail) | Copied. |
+| `cloud_mail/` (module Cloud Mail) | `cargo/cloud_mail/` (module Cloud Mail) | Copied. The module keeps its name: Frappe resolves module names across every app on a bench, and the Suite app already owns one called Mail. |
 | `cloud_mail/stalwart/` (JMAP management client) | `cargo/cloud_mail/stalwart/` | Unchanged. |
 | `cloud_mail/tenancy/` | `cargo/cloud_mail/tenancy/` | Changed for owner-less domains, the platform address, entitlement and re-verification. See [tenancy](#tenancy-changes-the-copied-code-needs). |
 | `cloud_mail/cluster/` | `cargo/cloud_mail/cluster/` | `bootstrap.py` is rewritten as flows. `plan.py` gains the pinned version, `certificate_management`, a `DnsServer` object built from the zone, store `update` operations, the Prometheus exporter and outbound limiters. `stores.py` is new. `naming.py` keeps `next_hostname`, `next_pool_name` and `assign_ehlo_hostnames`, loses `next_cluster_label`. |
 | Mail Domain, Mail Account, Mail Group, Mailing List, Mail Quota, DMARC Report, TLS Report and their child tables | `cargo/cloud_mail/doctype/` | Mail Domain: `site` optional, `holds_mailboxes`, `disabled_at`, `disabled_reason`, an ownership record re-verified daily. Mail Account: `is_platform_address`. The others unchanged. |
 | Stalwart Cluster | `cargo/cloud_mail/doctype/` | Loses the regions table, `is_default`, the SSH keypair, `label` and the four Store links. Gains `blob_bucket`, `data_store`, `in_memory_store`, `management_url`, `certificate_management`, `health`, `health_reason`, `metrics_token`, `auto_spawn`, `auto_setup_attempts`. Extends `WorkflowBuilder`. |
 | Stalwart Node, Egress Gateway | `cargo/cloud_mail/doctype/` | Linked to a `Machine`. `ipv4_address` is read from `Machine.public_ipv4`; `ipv6_address` is set only from a public IPv6, never the mesh address. SSH fields, `verify_ssh`, the host-key reset, `validate_single_node` and `_holds_the_only_data_store` are dropped. Node gains `consecutive_failures` and `drained_by`. |
-| Stalwart Store | Not copied | `cargo/cloud_mail/cluster/stores.py` holds `rocksdb_store`, `postgres_store`, `s3_store` and `redis_store`, lifted from the `_config_*` methods with their defaults. |
-| `api/mail/` | `cargo/cloud_mail/api/` | Authentication changes. Method names, response shapes and exception names do not, and `test_api_contract.py` pins them. |
-| `api/fc.py` | `cargo/cloud_mail/api/site.py` | Called by Central with `mail:*`. `create_site` also creates the platform account and returns no password. |
+| Stalwart Store | Copied for phases 1 to 3, removed in phase 4 | Until Cargo runs the stores there is nothing else to point a cluster at. Phase 4 replaces it with `cargo/cloud_mail/cluster/stores.py`, holding `rocksdb_store`, `postgres_store`, `s3_store` and `redis_store` lifted from the `_config_*` methods with their defaults. |
+| `api/mail/`, `api/site/` | `cargo/cloud_mail/api/mail/`, `cargo/cloud_mail/api/site/` | Authentication changes. Method names, response shapes and exception names do not, and `test_api_contract.py` pins them. |
+| `api/fc.py` | `cargo/cloud_mail/api/central.py` | Called by Central with `mail:*`. `create_site` also creates the platform account and returns no password. |
 | Suite Site | Mail Site, in `cargo/cloud_mail/doctype/` | Renamed. Loses `api_key`, `api_secret`, `user`, `allowed_ips`. Gains `mailboxes_allowed`, `send_only_account`, `max_messages_per_day`, `bounces_enabled`. Named by Central's `Site.name`. |
 | DNS Zone, DNS Record, `dns/` | `cargo/cargo/doctype/`, `cargo/dns/` | Moved to the core module and generalised. Nothing under `cargo/cargo/` or `cargo/dns/` imports `cargo/cloud_mail/`. |
 | Suite Cloud Settings | Mail Settings, a Single in `cargo/cloud_mail/` | Runtime knobs only: `skip_domain_verification`, report retention, `verify_stalwart_tls`, `disabled_domain_retention_days`, `ownership_miss_limit`, `contest_grace_days`, default limits for plain sites. Build-time values (versions, download URLs, ACME directory) become cluster fields with defaults. |
@@ -96,7 +96,7 @@ Tracks A, B, C, D1 and G start in phase 0 together. C and G are the critical pat
 | The cluster SSH keypair, `ssh_user`, `ssh_port`, pinned host keys | The `Machine` keypair over the mesh as root, with the host key recorded on first contact |
 | Operator-typed `ipv4_address` | `Machine.public_ipv4`, reported by Atlas |
 | `Suite Cloud Settings.public_url`, `utils.get_config`, `CONFIG_KEYS` | `Cargo Settings.cargo_url`; cluster fields with defaults; `default_mail_cluster_config` at spawn; `frappe.get_cached_doc("Mail Settings")` |
-| `utils.log_error`, `log_exception`, `enqueue_job`, `reconnect_on_failure`, `user_context` | `frappe.log_error`, `frappe.enqueue`, the workflow engine |
+| `utils.log_error`, `enqueue_job`, `reconnect_on_failure`, `user_context` | `frappe.log_error`, `frappe.enqueue`, the workflow engine. `log_exception` stays: it logs a traceback without local variables, which Cargo has no equivalent for and which keeps store secrets out of Error Log. |
 | The roles, the service user, `install.py`, the API key, the IP allow-list, `rotate_site_secret` | `cargo.auth.verify_token(scopes)`; System Manager for the desk |
 | `pick_cluster`, `Stalwart Cluster Region`, `is_default`, `resolve_label` | The region's one Active cluster |
 | `poll_pending_nodes`, `check_node` promotion, `last_health_at` as a signal | The provision flow's last task waits for the lease; `cargo/cloud_mail/health/` covers everything after |
@@ -252,7 +252,7 @@ Each phase ends with the whole Cargo test suite passing and names its rollback. 
 ### Phase 1: Copy the mail code
 
 1. Copy to the paths above. Rename `Suite Site` to `Mail Site`. Keep the `frappe-suite-verification` TXT prefix, because domain owners have published it.
-2. Leave out `provisioning/`, `Server Job`, `Server Job Task`, `install.py`, `patches/` and `stalwart_store/`.
+2. Leave out `provisioning/`, `Server Job`, `Server Job Task`, `install.py` and `patches/`.
 3. Rename imports from `suite_cloud.` to `cargo.`, reformat to tabs, replace the dropped helpers, create Mail Settings with the split above.
 4. DNS to core. `DNS Record.managed_by_doctype` becomes a Link to DocType instead of a Select of mail doctypes. `default_ttl` reads the zone only, with the zone's `default_ttl` required and defaulting to 300. `frappe.only_for("System Manager")` replaces the dropped role. `enqueue_verify_all_dns_records` goes through `frappe.enqueue(..., deduplicate=True)`. `stalwart_dns_server` moves to `plan.dns_server_object`; `is_default` goes. Tests land at `cargo/dns/test_resolver.py` and under `cargo/cargo/doctype/dns_zone/`.
 5. The tenancy data-model changes from the table above, with tests in `test_tenancy.py`: an owner-less domain inserts; a site adding a name under the zone is still refused; site A's platform account is visible to A and not found for B; `owned("Mail Domain", <shared>)` is not found for every site; an address on the shared domain is refused as a recipient; counts exclude the platform account; archive disables domains; purge after retention; takeover of an archived site's domain.
@@ -305,7 +305,7 @@ Ends when `tools/mail-smoke/check.sh <cluster> --phase 3` is green: `check_drift
 
 Entry gate: the Postgres and Valkey services Active in the 3b region, `docs/postgres.md` documenting a restore drill executed there once, and D1 live in Central. Until D1 lands, `accept_cargo_report` ignores `mail`.
 
-1. Link `blob_bucket`, `data_store` and `in_memory_store`. A `create_stores` task inserts the `Bucket`, `Postgres Database` and `Valkey Credential` in-process. Derive `single_node` and `coordinator`. Verify the store `update` operations live.
+1. Link `blob_bucket`, `data_store` and `in_memory_store`, and remove `Stalwart Store` in favour of `stores.py`. A `create_stores` task inserts the `Bucket`, `Postgres Database` and `Valkey Credential` in-process. Derive `single_node` and `coordinator`. Verify the store `update` operations live.
 2. Remove the regions table, `is_default`, `pick_cluster` and the label. Refuse a second Active cluster, as object storage does.
 3. `cargo/cloud_mail/spawn.py` with `ensure_mail`, driven by `default_mail_cluster_config` (`node_count`, `node: {cpu_millicores, ram_gb, disk_gb}`, `acme_contact_email`, version overrides), validated through `spawn_config`. It waits for Garage, Postgres and Valkey to be Active and for an enabled DNS Zone whose probe passes; otherwise it rents nothing. It adopts the platform domain and creates `postmaster@` when the cluster goes Active.
 4. The platform address, the limiters, entitlement enforcement, the `kind: "domain"` webhook. `service: "mail"` reported with `service_endpoint` set to the public HTTPS base URL.
