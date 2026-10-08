@@ -258,18 +258,18 @@ Each phase ends with the whole Cargo test suite passing and names its rollback. 
 5. The tenancy data-model changes from the table above, with tests in `test_tenancy.py`: an owner-less domain inserts; a site adding a name under the zone is still refused; site A's platform account is visible to A and not found for B; `owned("Mail Domain", <shared>)` is not found for every site; an address on the shared domain is refused as a recipient; counts exclude the platform account; archive disables domains; purge after retention; takeover of an archived site's domain.
 6. Hooks: hourly domain refresh and verification, hourly DMARC and TLS fetch; daily DNS record verification, reverse DNS verification, report pruning, drift check, ownership re-check and `purge_disabled_domains`. Not copied: `poll_pending_nodes`, `retry_failed_jobs`.
 
-Ends when the directory, tenancy, DNS, DMARC and TLS tests pass against the fake Stalwart. Nodes cannot be provisioned yet.
+Done on 2026-10-09. Ends when the directory, tenancy, DNS, DMARC and TLS tests pass against the fake Stalwart. Nodes cannot be provisioned yet.
 
 ### Phase 2: Authentication
 
 1. The signing helpers in `cargo/testing.py`; `test_bucket.py` and `api/test_webhooks.py` converted to them.
 2. `verify_token(scopes)` with the rules above; `bucket:*` required on the bucket endpoints and on `configure`.
 3. The lifecycle API behind `mail:*`, creating Mail Site rows named by Central's `Site.name` and accepting `mailboxes_allowed`, the limits, the team's ownership token and `delete_data`. `suspend_site` and `archive_site` lock accounts as described.
-4. The directory API behind `mail` with `site`. `create_domain(domain, grant)`.
+4. The directory API behind `mail` with `site`. `create_domain(domain, grant)` waits for phase 7, with the registry that issues grants; until then `create_domain(domain)` relies on the TXT proof alone.
 5. `docs/central-contract.md` rewritten against Central's code first (see [contract changes](#contract-changes)), then the claim table, `mail_token`, `mail_domain_grant`, the lifecycle calls and the domain events added.
 6. `test_api_contract.py`: a frozen list of whitelisted paths equal to what the Suite app's `fake_suite_cloud.py` dispatches; each refuses a request without a token; the exception names the Suite client switches on are kept (`SiteSuspendedError`, `StalwartRejected`, `ClusterMisconfiguredError`, Frappe's `DoesNotExistError`, `DuplicateEntryError`, `TooManyRequestsError`); `owned()` still raises `DoesNotExistError` for another site's object.
 
-Ends when the rewritten `test_site_api.py` and `test_tenancy.py` pass with the real `token_claims` through `trusted_test_keys()`, covering: a site reaches its own objects and gets not-found for others; Central acts on any site and on unowned domains; `mailboxes_allowed` off forces send-only and refuses groups, lists and catch-all; `bucket:*` is refused by the mail API and `mail` by the bucket API with 403; a wrong `aud`, `iss`, `kid` or an expired token is 401 with no Mail Site lookup; Suspended answers `SiteSuspendedError`, Archived or unknown answers 401; a background call is refused without fetching keys; the throttle keys on `site`; an Atlas-signed token carrying `site` or `mail` is refused; scope `*` satisfies nothing; suspend, resume and archive leave the expected roles and domain flags on the fake Stalwart.
+Done on 2026-10-09. Ends when the rewritten `test_site_api.py` and `test_tenancy.py` pass with the real `token_claims` through `trusted_test_keys()`, covering: a site reaches its own objects and gets not-found for others; Central acts on any site and on unowned domains; `mailboxes_allowed` off forces send-only and refuses groups, lists and catch-all; `bucket:*` is refused by the mail API and `mail` by the bucket API with 403; a wrong `aud`, `iss`, `kid` or an expired token is 401 with no Mail Site lookup; Suspended answers `SiteSuspendedError`, Archived or unknown answers 401; a background call is refused without fetching keys; the throttle keys on `site`; an Atlas-signed token carrying `site` or `mail` is refused; scope `*` satisfies nothing; suspend, resume and archive leave the expected roles and domain flags on the fake Stalwart.
 
 ### Phase 2b: Extract the regional-service helpers
 
