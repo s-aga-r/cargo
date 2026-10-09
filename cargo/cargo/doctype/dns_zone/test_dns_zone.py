@@ -1,5 +1,5 @@
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from cargo.testing import TEST_ZONE, make_dns_zone
 
@@ -60,3 +60,12 @@ def make_dns_record(zone: str | None = None):
 	record.value = "203.0.113.10"
 	record.category = "Other"
 	return record.insert()
+
+
+class TestRelativeHosts(UnitTestCase):
+	def test_names_are_relative_to_their_zone_and_the_zone_itself_is_the_apex(self) -> None:
+		from cargo.cargo.doctype.dns_zone.dns_zone import APEX, relative_host
+
+		self.assertEqual(relative_host("n1.mail.blr.example", "mail.blr.example"), "n1")
+		self.assertEqual(relative_host("mail.blr.example", "mail.blr.example"), APEX)
+		self.assertRaises(frappe.ValidationError, relative_host, "n1.other.example", "mail.blr.example")

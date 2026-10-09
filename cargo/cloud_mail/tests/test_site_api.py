@@ -691,9 +691,6 @@ class TestCentralApi(SiteApiTestCase):
 	def setUp(self) -> None:
 		super().setUp()
 		self.act_as_central()
-		# The site may hold a real default cluster; the region's cluster must be the fixture.
-		frappe.db.set_value("Stalwart Cluster", {"name": ["!=", self.cluster.name]}, "is_default", 0)
-		self.cluster.db_set("is_default", 1)
 
 	def test_central_registers_a_site_with_its_entitlement_and_limits(self) -> None:
 		result = fc.create_site(

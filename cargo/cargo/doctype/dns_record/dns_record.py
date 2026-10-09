@@ -8,7 +8,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, now
 
-from cargo.cargo.doctype.dns_zone.dns_zone import DEFAULT_TTL, settings_zone
+from cargo.cargo.doctype.dns_zone.dns_zone import APEX, DEFAULT_TTL, settings_zone
 from cargo.dns import get_dns_provider
 from cargo.dns.resolver import verify_dns_record
 
@@ -37,7 +37,7 @@ class DNSRecord(Document):
 
 	@cached_property
 	def fqdn(self) -> str:
-		return f"{self.host}.{self.dns_zone}"
+		return self.dns_zone if self.host == APEX else f"{self.host}.{self.dns_zone}"
 
 	def validate(self) -> None:
 		self.host = (self.host or "").strip().lower()

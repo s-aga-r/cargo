@@ -93,12 +93,16 @@ class DNSProvider:
 		)
 		return Client(config)
 
+	def record_name(self, host: str) -> str:
+		"""Lexicon knows no ``@``: the apex is named by the zone itself."""
+		return self.domain if host == "@" else host
+
 	def read_dns_records(self, type: str, host: str | None = None) -> list[dict]:
 		config = {"action": "list"}
 		if type:
 			config["type"] = type
 		if host:
-			config["name"] = host
+			config["name"] = self.record_name(host)
 
 		return self.get_client(config).execute()
 
@@ -114,7 +118,7 @@ class DNSProvider:
 		config = {
 			"action": "create",
 			"type": type,
-			"name": host,
+			"name": self.record_name(host),
 			"content": value,
 			"ttl": ttl,
 			"priority": priority,
@@ -127,7 +131,7 @@ class DNSProvider:
 		config = {
 			"action": "update",
 			"type": type,
-			"name": host,
+			"name": self.record_name(host),
 			"content": value,
 			"ttl": ttl,
 			"priority": priority,
@@ -157,7 +161,7 @@ class DNSProvider:
 
 		success = True
 		for record in records:
-			config = {"action": "delete", "type": type, "name": host}
+			config = {"action": "delete", "type": type, "name": self.record_name(host)}
 			if value is not None:
 				config["content"] = record.get("content")  # by value: see ensure_dns_record
 			else:

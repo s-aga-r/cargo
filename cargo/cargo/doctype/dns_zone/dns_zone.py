@@ -120,9 +120,14 @@ def settings_zone() -> str | None:
 	return frappe.db.get_single_value("Cargo Settings", "dns_zone")
 
 
-def relative_host(fqdn: str, zone: str) -> str:
-	"""``n1.blr.frappemail.com`` -> ``n1.blr`` (records are relative to their zone)."""
+APEX = "@"
 
+
+def relative_host(fqdn: str, zone: str) -> str:
+	"""``n1.mail.blr.example`` -> ``n1`` in zone ``mail.blr.example``; the zone itself is ``@``."""
+
+	if fqdn == zone:
+		return APEX
 	suffix = f".{zone}"
 	if not fqdn.endswith(suffix):
 		frappe.throw(_("{0} is not under the DNS zone {1}.").format(fqdn, zone))

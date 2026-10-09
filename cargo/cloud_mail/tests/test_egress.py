@@ -94,8 +94,8 @@ class TestEgress(IntegrationTestCase):
 		self.assertEqual(
 			[(r.host, r.value, r.category) for r in record],
 			[
-				("g1.blr", "203.0.113.50", "Egress"),
-				("g1.blr", f"v=spf1 include:spf.{self.cluster.default_domain} -all", "SPF"),
+				("g1", "203.0.113.50", "Egress"),
+				("g1", f"v=spf1 include:spf.{self.cluster.default_domain} -all", "SPF"),
 			],
 		)
 
@@ -119,7 +119,7 @@ class TestEgress(IntegrationTestCase):
 			for r in frappe.get_all("DNS Record", {"managed_by": pool.name}, ["host", "value"])
 		)
 		# The gateway is still Pending, so the pool hostname lists nobody yet.
-		self.assertEqual(hosts, [("p1-1.blr", "203.0.113.51"), ("p1-2.blr", "203.0.113.52")])
+		self.assertEqual(hosts, [("p1-1", "203.0.113.51"), ("p1-2", "203.0.113.52")])
 		self.gateway.set_status("Active")
 		hosts = sorted(
 			(r.host, r.value)
@@ -127,11 +127,11 @@ class TestEgress(IntegrationTestCase):
 		)
 		self.assertEqual(
 			hosts,
-			[("p1-1.blr", "203.0.113.51"), ("p1-2.blr", "203.0.113.52"), ("p1.out.blr", "203.0.113.50")],
+			[("p1-1", "203.0.113.51"), ("p1-2", "203.0.113.52"), ("p1.out", "203.0.113.50")],
 		)
 		self.gateway.set_status("Disabled")
-		self.assertFalse(frappe.db.exists("DNS Record", {"managed_by": pool.name, "host": "p1.out.blr"}))
-		spf = frappe.db.get_value("DNS Record", {"host": "spf.blr"}, "value")
+		self.assertFalse(frappe.db.exists("DNS Record", {"managed_by": pool.name, "host": "p1.out"}))
+		spf = frappe.db.get_value("DNS Record", {"host": "spf"}, "value")
 		for ip in ("203.0.113.51", "203.0.113.52", "203.0.113.53"):
 			self.assertIn(f"ip4:{ip}", spf)
 
@@ -330,7 +330,7 @@ class TestEgress(IntegrationTestCase):
 
 	def test_pool_must_belong_to_the_cluster(self) -> None:
 		pool = self.make_pool()
-		other = activate_cluster(make_cluster("blr-2", hostname=f"mail.blr2.{ROOT_DOMAIN}"))
+		other = activate_cluster(make_cluster("blr-2", zone="other.example.test"))
 		self.addCleanup(remove_cluster, other.name)
 
 		other.default_egress_pool = pool.name
@@ -363,7 +363,7 @@ class TestEgress(IntegrationTestCase):
 		self.site.db_set("egress_pool", None)
 		pool.delete()
 		self.assertFalse(frappe.db.exists("DNS Record", {"managed_by": pool.name}))
-		self.assertNotIn("ip4:203.0.113.51", frappe.db.get_value("DNS Record", {"host": "spf.blr"}, "value"))
+		self.assertNotIn("ip4:203.0.113.51", frappe.db.get_value("DNS Record", {"host": "spf"}, "value"))
 
 	def test_spf_includes_nodes_and_pools(self) -> None:
 		node = make_node(self.cluster, "203.0.113.10")
@@ -371,6 +371,6 @@ class TestEgress(IntegrationTestCase):
 		self.make_pool(("203.0.113.51",))
 		dns.sync_spf_record(self.cluster)
 		self.assertEqual(
-			frappe.db.get_value("DNS Record", {"host": "spf.blr"}, "value"),
+			frappe.db.get_value("DNS Record", {"host": "spf"}, "value"),
 			"v=spf1 ip4:203.0.113.10 ip4:203.0.113.51 -all",
 		)

@@ -11,6 +11,7 @@ from cargo.cloud_mail.tests.core_fixtures import (
 	make_zone,
 	no_dns_provider,
 )
+from cargo.testing import make_dns_zone
 
 
 def make_store(kind: str, type: str, title: str | None = None, **fields):
@@ -27,8 +28,9 @@ def make_store(kind: str, type: str, title: str | None = None, **fields):
 	return doc
 
 
-def make_cluster(name: str = "blr-1", hostname: str | None = None, multi_node: bool = True, **fields):
-	"""``name`` becomes the title; the document is named by its hostname."""
+def make_cluster(name: str = "blr-1", zone: str = ROOT_DOMAIN, multi_node: bool = True, **fields):
+	"""``name`` becomes the title; the document is named ``mx.<zone>``, and a zone other than
+	the fixture one is created on the way."""
 	if multi_node:
 		data = make_store("Data", "PostgreSql", host="db.example.test", auth_secret="pg-secret")
 		memory = make_store("In-Memory", "Redis", url="redis://redis.example.test:6379")
@@ -37,18 +39,15 @@ def make_cluster(name: str = "blr-1", hostname: str | None = None, multi_node: b
 		data = make_store("Data", "RocksDb", path="/var/lib/stalwart")
 		memory = blob = None
 
-	# ``hostname`` is accepted for readability; the cluster derives it from the label and zone.
-	hostname = hostname or f"mail.blr.{ROOT_DOMAIN}"
-	label = hostname.split(".")[1]
-	regions = fields.pop("regions", [{"region": label}])
-	remove_cluster(hostname)
+	if not frappe.db.exists("DNS Zone", zone):
+		make_dns_zone(zone, default=False)
+	remove_cluster(f"mx.{zone}")
 	cluster = frappe.get_doc(
 		{
 			"doctype": "Stalwart Cluster",
 			"title": name,
 			"acme_contact_email": "ops@example.test",
-			"label": label,
-			"regions": regions,
+			"dns_zone": zone,
 			"data_store": data.name,
 			"blob_store": blob.name if blob else None,
 			"in_memory_store": memory.name if memory else None,

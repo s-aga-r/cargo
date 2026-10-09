@@ -11,7 +11,7 @@ and the playbook gates the scripts kept.
 SITE=cargo.localhost tools/stalwart-compat/run.sh          # --keep leaves the container up
 ```
 
-Needs docker and a bench with the site. The cluster hostname (`mail.compat.compat.test`)
+Needs docker and a bench with the site. The cluster hostname (`mx.compat.test`)
 must resolve to 127.0.0.1, where the container publishes port 443; the script prints the
 `/etc/hosts` line, and writes it itself in CI. The rendered scripts carry the cluster's
 secrets and are removed when the run ends.

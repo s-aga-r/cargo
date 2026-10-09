@@ -12,7 +12,6 @@ from cargo.cloud_mail.cluster.bootstrap import SCRIPTS
 from cargo.ssh import script
 from cargo.testing import make_dns_zone
 
-LABEL = "compat"
 ZONE = "compat.test"
 POSTGRES_SECRET = "compat-secret"
 
@@ -45,7 +44,7 @@ def render(directory: str) -> None:
 	)
 	memory = _store("compat Redis", kind="In-Memory", type="Redis", url="redis://127.0.0.1:6379")
 
-	name = frappe.db.exists("Stalwart Cluster", {"label": LABEL, "dns_zone": zone.name})
+	name = frappe.db.exists("Stalwart Cluster", {"dns_zone": zone.name})
 	cluster = (
 		frappe.get_doc("Stalwart Cluster", name)
 		if name
@@ -53,13 +52,11 @@ def render(directory: str) -> None:
 			{
 				"doctype": "Stalwart Cluster",
 				"title": "compat",
-				"label": LABEL,
 				"dns_zone": zone.name,
 				"acme_contact_email": "ops@compat.test",
 				"certificate_management": "Manual",
 				"data_store": data.name,
 				"in_memory_store": memory.name,
-				"regions": [{"region": LABEL}],
 			}
 		).insert()
 	)
@@ -91,7 +88,7 @@ def render(directory: str) -> None:
 
 def verify() -> None:
 	"""Read back, through Cargo's own client, what the scripts were meant to leave behind."""
-	name = frappe.db.get_value("Stalwart Cluster", {"label": LABEL})
+	name = frappe.db.get_value("Stalwart Cluster", {"dns_zone": ZONE})
 	cluster = frappe.get_doc("Stalwart Cluster", name)
 	node = frappe.get_doc("Stalwart Node", cluster.bootstrap_node)
 	node.db_set("status", "Provisioned")

@@ -16,6 +16,7 @@ from cargo.cloud_mail.tests.fixtures import (
 	no_dns_provider,
 	remove_cluster,
 )
+from cargo.testing import make_dns_zone
 
 
 class TestStalwartCluster(IntegrationTestCase):
@@ -29,67 +30,45 @@ class TestStalwartCluster(IntegrationTestCase):
 	def test_cluster_derives_zone_url_and_coordinator(self) -> None:
 		cluster = make_cluster()
 
-		self.assertEqual(cluster.default_domain, f"blr.{ROOT_DOMAIN}")
-		self.assertEqual(cluster.base_url, f"https://mail.blr.{ROOT_DOMAIN}")
+		self.assertEqual(cluster.default_domain, ROOT_DOMAIN)
+		self.assertEqual(cluster.base_url, f"https://mx.{ROOT_DOMAIN}")
 		self.assertEqual(cluster.coordinator, "Default")
 		self.assertEqual(cluster.status, "Pending")
 		self.assertEqual(len(cluster.get_password("admin_password")), 32)
 		self.assertEqual(cluster.stalwart_version, plan.STALWART_VERSION)
 
-	def test_label_names_the_cluster_and_is_handed_out(self) -> None:
-		store = make_store("Data", "PostgreSql", host="db", auth_secret="x")
-		bad = frappe.get_doc(
-			{
-				"doctype": "Stalwart Cluster",
-				"title": "bad",
-				"label": "Bad Label!",
-				"data_store": store.name,
-				"acme_contact_email": "ops@example.test",
-			}
-		)
-		self.assertRaisesRegex(frappe.ValidationError, "Label must be", bad.insert)
-
-		remove_cluster(f"mail.c1.{ROOT_DOMAIN}")
-		auto = frappe.get_doc(
-			{
-				"doctype": "Stalwart Cluster",
-				"title": "auto",
-				"data_store": store.name,
-				"acme_contact_email": "ops@example.test",
-			}
-		).insert()
+	def test_the_zone_names_the_cluster_and_holds_one(self) -> None:
+		cluster = make_cluster()
 		self.assertEqual(
-			(auto.label, auto.name, auto.default_domain),
-			("c1", f"mail.c1.{ROOT_DOMAIN}", f"c1.{ROOT_DOMAIN}"),
+			(cluster.name, cluster.hostname, cluster.default_domain, cluster.dns_zone),
+			(f"mx.{ROOT_DOMAIN}", f"mx.{ROOT_DOMAIN}", ROOT_DOMAIN, ROOT_DOMAIN),
 		)
-		self.assertEqual(auto.regions, [])  # serves any region
-		self.assertTrue(auto.serves("anything"))
-		dup = frappe.get_doc(
+		store = make_store("Data", "PostgreSql", host="db", auth_secret="x")
+		second = frappe.get_doc(
 			{
 				"doctype": "Stalwart Cluster",
-				"title": "dup",
-				"label": "c1",
+				"title": "second",
 				"data_store": store.name,
 				"acme_contact_email": "ops@example.test",
 			}
 		)
-		self.assertRaisesRegex(frappe.ValidationError, "already used", dup.insert)
-		remove_cluster(auto.name)
+		self.assertRaisesRegex(frappe.ValidationError, "already has the cluster", second.insert)
 
 	def test_store_kind_is_enforced(self) -> None:
 		blob = make_store("Blob", "S3", region="r", bucket="b", access_key="a", secret_key="s")
+		make_dns_zone("kind.example.test", default=False)
 		cluster = frappe.get_doc(
 			{
 				"doctype": "Stalwart Cluster",
 				"title": "kind",
-				"label": "kind",
+				"dns_zone": "kind.example.test",
 				"data_store": blob.name,
 			}
 		)
 		self.assertRaisesRegex(frappe.ValidationError, "Data store", cluster.insert)
 
 	def test_embedded_stores_pin_the_cluster_to_one_full_node(self) -> None:
-		cluster = make_cluster(name="solo", hostname=f"mail.solo.{ROOT_DOMAIN}", multi_node=False)
+		cluster = make_cluster(name="solo", multi_node=False)
 		self.assertEqual(cluster.single_node, 1)
 		self.assertEqual(cluster.coordinator, "Disabled")
 		self.assertRaisesRegex(
@@ -176,33 +155,31 @@ class TestStalwartCluster(IntegrationTestCase):
 		)
 		self.assertEqual(
 			[(r.host, r.type, r.value, r.category) for r in records],
-			[("n1.blr", "A", "203.0.113.10", "Node"), ("n1.blr", "AAAA", "2001:db8::10", "Node")],
+			[("n1", "A", "203.0.113.10", "Node"), ("n1", "AAAA", "2001:db8::10", "Node")],
 		)
 		# Not yet in ingress: the cluster hostname does not point at a pending node.
 		self.assertFalse(
-			frappe.db.exists(
-				"DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "mail.blr", "managed_by": node.name}
-			)
+			frappe.db.exists("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "mx", "managed_by": node.name})
 		)
 
 		node.db_set("status", "Active")
 		dns.sync_node_records(node, include_ingress=True)
 		dns.sync_spf_record(cluster)
 		ingress = frappe.get_all(
-			"DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "mail.blr"}, pluck="value", order_by="type"
+			"DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "mx"}, pluck="value", order_by="type"
 		)
 		self.assertEqual(ingress, ["203.0.113.10", "2001:db8::10"])
 		spf = frappe.db.get_value(
-			"DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "spf.blr", "type": "TXT"}, "value"
+			"DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "spf", "type": "TXT"}, "value"
 		)
 		self.assertEqual(spf, "v=spf1 ip4:203.0.113.10 ip6:2001:db8::10 -all")
 		zone_spf = frappe.db.get_value(
-			"DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "blr", "type": "TXT"}, "value"
+			"DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "@", "type": "TXT"}, "value"
 		)
-		self.assertEqual(zone_spf, f"v=spf1 include:spf.blr.{ROOT_DOMAIN} -all")
+		self.assertEqual(zone_spf, f"v=spf1 include:spf.{ROOT_DOMAIN} -all")
 
 		dns.sync_node_records(node, include_ingress=False)
-		self.assertFalse(frappe.db.exists("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "mail.blr"}))
+		self.assertFalse(frappe.db.exists("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "mx"}))
 		self.assertEqual(frappe.db.get_value("Stalwart Node", node.name, "in_ingress_dns"), 0)
 
 	def test_removing_a_node_updates_spf_and_frees_a_failed_bootstrap(self) -> None:
@@ -214,13 +191,13 @@ class TestStalwartCluster(IntegrationTestCase):
 		dns.sync_spf_record(cluster)
 		self.assertIn(
 			"ip4:203.0.113.10",
-			frappe.db.get_value("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "spf.blr"}, "value"),
+			frappe.db.get_value("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "spf"}, "value"),
 		)
 
 		bootstrap.drain_node(node)  # Draining nodes still send
 		self.assertIn(
 			"ip4:203.0.113.10",
-			frappe.db.get_value("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "spf.blr"}, "value"),
+			frappe.db.get_value("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "spf"}, "value"),
 		)
 		node.db_set("status", "Failed")
 		cluster.db_set({"status": "Failed", "bootstrap_node": node.name})
@@ -228,7 +205,7 @@ class TestStalwartCluster(IntegrationTestCase):
 		frappe.get_doc("Stalwart Node", node.name).delete()
 
 		self.assertEqual(
-			frappe.db.get_value("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "spf.blr"}, "value"),
+			frappe.db.get_value("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "spf"}, "value"),
 			"v=spf1 -all",
 		)
 		self.assertEqual(
@@ -260,14 +237,14 @@ class TestStalwartCluster(IntegrationTestCase):
 		wanted = [
 			{
 				"dns_zone": ROOT_DOMAIN,
-				"host": "n1.blr",
+				"host": "n1",
 				"type": "A",
 				"value": "203.0.113.10",
 				"category": "Egress",
 			}
 		]
 		reconcile_managed_records("Stalwart Cluster", cluster.name, wanted)
-		wanted_filters = {"dns_zone": ROOT_DOMAIN, "host": "n1.blr", "type": "A"}
+		wanted_filters = {"dns_zone": ROOT_DOMAIN, "host": "n1", "type": "A"}
 		self.assertEqual(frappe.db.count("DNS Record", wanted_filters), 2)
 
 		with patch("cargo.cargo.doctype.dns_record.dns_record.get_dns_provider") as provider:
@@ -275,7 +252,7 @@ class TestStalwartCluster(IntegrationTestCase):
 			reconcile_managed_records("Stalwart Cluster", cluster.name, [])
 			provider.return_value.delete_dns_record.assert_not_called()  # the node still wants it
 			frappe.get_doc("Stalwart Node", node.name).delete()  # Pending nodes delete normally
-		self.assertFalse(frappe.db.exists("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "n1.blr"}))
+		self.assertFalse(frappe.db.exists("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "n1"}))
 
 	def test_finish_bootstrap_and_key_rotation_through_the_fake(self) -> None:
 		from cargo.cloud_mail.cluster import bootstrap
@@ -339,7 +316,7 @@ class TestStalwartCluster(IntegrationTestCase):
 			self.assertFalse(plan.same_value({"a": {"0": {"x": 1}}}, {"a": {"0": {"x": 2}}}))
 			self.assertTrue(
 				frappe.db.exists(
-					"DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "mail.blr", "managed_by": node.name}
+					"DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "mx", "managed_by": node.name}
 				)
 			)
 			self.assertIn(cluster.get_password("api_key"), fake.tokens)
@@ -381,13 +358,11 @@ class TestStalwartCluster(IntegrationTestCase):
 		self.assertFalse(bootstrap.serves_clients(node))
 		bootstrap.activate_node(node)
 		self.assertFalse(
-			frappe.db.exists(
-				"DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "mail.blr", "managed_by": node.name}
-			)
+			frappe.db.exists("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "mx", "managed_by": node.name})
 		)
 		self.assertIn(
 			"ip4:203.0.113.20",
-			frappe.db.get_value("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "spf.blr"}, "value"),
+			frappe.db.get_value("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "spf"}, "value"),
 		)
 
 	def test_a_manual_certificate_leaves_acme_out_of_the_plan(self) -> None:
@@ -404,8 +379,8 @@ class TestStalwartCluster(IntegrationTestCase):
 		bootstrap = plan.bootstrap_plan(cluster)[0]
 		self.assertEqual(bootstrap["object"], "Bootstrap")
 		value = bootstrap["value"]
-		self.assertEqual(value["serverHostname"], f"mail.blr.{ROOT_DOMAIN}")
-		self.assertEqual(value["defaultDomain"], f"blr.{ROOT_DOMAIN}")
+		self.assertEqual(value["serverHostname"], f"mx.{ROOT_DOMAIN}")
+		self.assertEqual(value["defaultDomain"], ROOT_DOMAIN)
 		self.assertEqual(value["dataStore"]["@type"], "PostgreSql")
 		self.assertEqual(value["dataStore"]["authSecret"], {"@type": "Value", "secret": "pg-secret"})
 		self.assertEqual(value["blobStore"]["@type"], "S3")

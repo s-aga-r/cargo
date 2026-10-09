@@ -1,20 +1,17 @@
 # Copyright (c) 2026, Frappe Technologies Pvt. Ltd. and contributors
 # For license information, please see license.txt
 
-import re
-
 import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils import now
 
 from cargo.cargo.doctype.dns_zone.dns_zone import settings_zone
-from cargo.cloud_mail.cluster import bootstrap, dns, egress, naming, plan, reconcile
+from cargo.cloud_mail.cluster import bootstrap, dns, egress, plan, reconcile
 from cargo.cloud_mail.stalwart import forget_sessions, get_admin_client, get_client
 from cargo.cloud_mail.stalwart.credentials import Credential
 from cargo.cloud_mail.utils import dkim_algorithms, log_exception, validate_version
 
-LABEL = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 STORE_KINDS = {
 	"data_store": "Data",
 	"blob_store": "Blob",
@@ -31,10 +28,6 @@ class StalwartCluster(Document):
 
 	if TYPE_CHECKING:
 		from frappe.types import DF
-
-		from cargo.cloud_mail.doctype.stalwart_cluster_region.stalwart_cluster_region import (
-			StalwartClusterRegion,
-		)
 
 		acme_contact_email: DF.Data | None
 		acme_directory_url: DF.Data | None
@@ -58,10 +51,7 @@ class StalwartCluster(Document):
 		health_reason: DF.SmallText | None
 		hostname: DF.Data
 		in_memory_store: DF.Link | None
-		is_default: DF.Check
-		label: DF.Data | None
 		last_config_sync_at: DF.Datetime | None
-		regions: DF.Table[StalwartClusterRegion]
 		relay_password: DF.Password | None
 		relay_username: DF.Data | None
 		search_store: DF.Link | None
@@ -86,7 +76,6 @@ class StalwartCluster(Document):
 		self.validate_names()
 		self.apply_defaults()
 		self.validate_stores()
-		self.validate_default()
 		self.validate_egress_pool()
 
 	def validate_egress_pool(self) -> None:
@@ -119,51 +108,27 @@ class StalwartCluster(Document):
 	# --- validation -----------------------------------------------------------
 
 	def autoname(self) -> None:
-		# Naming runs before validate: the label and zone settle here so the hostname can be derived.
-		self.resolve_label()
+		# Naming runs before validate: the zone settles here so the hostname can be derived.
+		self.resolve_names()
 		self.name = self.hostname
 
-	def resolve_label(self) -> None:
-		"""Label + zone give the hostname and default domain; both are fixed once the cluster exists."""
+	def resolve_names(self) -> None:
+		"""The cluster is its zone's: the zone apex is the default domain, ``mx`` under it the
+		hostname. One cluster per zone, so a region has one cluster."""
 
 		self.dns_zone = self.dns_zone or settings_zone()
 		if not self.dns_zone:
 			frappe.throw(_("Create a DNS Zone before creating clusters."))
-		self.label = (self.label or "").strip().lower() or naming.next_cluster_label(self.dns_zone)
-		if not LABEL.match(self.label):
-			frappe.throw(_("Label must be lowercase letters, digits and dashes, e.g. c1 or eu."))
-		taken = frappe.db.exists(
-			"Stalwart Cluster", {"label": self.label, "dns_zone": self.dns_zone, "name": ["!=", self.name]}
-		)
-		if taken:
-			frappe.throw(
-				_("Label {0} is already used by another cluster in {1}.").format(self.label, self.dns_zone)
-			)
-		self.hostname = f"mail.{self.label}.{self.dns_zone}"
-		self.default_domain = f"{self.label}.{self.dns_zone}"
+		other = frappe.db.exists("Stalwart Cluster", {"dns_zone": self.dns_zone, "name": ["!=", self.name]})
+		if other:
+			frappe.throw(_("Zone {0} already has the cluster {1}.").format(self.dns_zone, other))
+		self.default_domain = self.dns_zone
+		self.hostname = f"mx.{self.dns_zone}"
 		self.base_url = f"https://{self.hostname}"
 
 	def validate_names(self) -> None:
-		self.resolve_label()
+		self.resolve_names()
 		self.title = (self.title or "").strip() or self.hostname
-		self.validate_regions()
-
-	def validate_regions(self) -> None:
-		seen = set()
-		for row in self.regions:
-			row.region = (row.region or "").strip().lower()
-			if not row.region:
-				frappe.throw(_("Region cannot be blank."))
-			if row.region in seen:
-				frappe.throw(_("Region {0} is listed twice.").format(row.region))
-			seen.add(row.region)
-
-	def serves(self, region: str | None) -> bool:
-		"""No regions means any region."""
-
-		if not self.regions:
-			return True
-		return bool(region) and region.strip().lower() in {r.region for r in self.regions}
 
 	def apply_defaults(self) -> None:
 		self.stalwart_version = validate_version(
@@ -190,12 +155,6 @@ class StalwartCluster(Document):
 		self.coordinator = "Default" if has_redis and not self.single_node else "Disabled"
 		if self.node_count() > 1 and self.coordinator == "Disabled":
 			frappe.throw(_("A multi-node cluster needs a Redis in-memory store to coordinate nodes."))
-
-	def validate_default(self) -> None:
-		if self.is_default:
-			frappe.db.set_value(
-				"Stalwart Cluster", {"is_default": 1, "name": ["!=", self.name]}, "is_default", 0
-			)
 
 	# --- helpers --------------------------------------------------------------
 
@@ -332,11 +291,12 @@ def check_all_clusters() -> None:
 
 
 def region_cluster() -> str:
-	"""The cluster this region serves from. Until a region has exactly one, the default or
-	the only active one stands in."""
+	"""The cluster this region serves from: the one in the zone Cargo Settings names, or the
+	only enabled one while that zone is not set."""
 
-	name = frappe.db.get_value("Stalwart Cluster", {"is_default": 1, "enabled": 1}) or frappe.db.get_value(
-		"Stalwart Cluster", {"status": "Active", "enabled": 1}
+	zone = settings_zone()
+	name = (zone and frappe.db.get_value("Stalwart Cluster", {"dns_zone": zone, "enabled": 1})) or (
+		frappe.db.get_value("Stalwart Cluster", {"enabled": 1})
 	)
 	if not name:
 		frappe.throw(_("No Stalwart cluster serves this region yet."))

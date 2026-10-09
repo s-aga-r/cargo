@@ -15,15 +15,12 @@
   "health_reason",
   "stalwart_version",
   "naming_section",
-  "label",
   "dns_zone",
   "column_break_naming",
   "hostname",
   "default_domain",
   "base_url",
   "placement_section",
-  "is_default",
-  "regions",
   "stores_tab",
   "data_store",
   "blob_store",
@@ -128,15 +125,7 @@
    "label": "Naming"
   },
   {
-   "description": "Short set-once id that namespaces the cluster under its zone. With label blr and zone frappemail.com the cluster is mail.blr.frappemail.com, its nodes n1.blr.frappemail.com and so on, and one wildcard certificate covers them. Lowercase letters, digits and dashes; handed out as c1, c2, ... when left blank. Only a namespace, not a place.",
-   "fieldname": "label",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "label": "Label",
-   "set_only_once": 1
-  },
-  {
-   "description": "Zone the cluster's hostnames are derived under and its records are published in. Defaults to the default zone. Cannot change after saving.",
+   "description": "The region's mail zone. One cluster per zone; defaults to the zone on Cargo Settings.",
    "fieldname": "dns_zone",
    "fieldtype": "Link",
    "in_standard_filter": 1,
@@ -150,7 +139,7 @@
    "fieldtype": "Column Break"
   },
   {
-   "description": "Public address of the cluster and its document name, built from the label and the zone, e.g. mail.blr.frappemail.com. Mail clients, MX records and sites all use it.",
+   "description": "Public address of the cluster and its document name: mx under the region's zone, e.g. mx.mail.blr.frappe.cloud. Mail clients, MX records and sites all use it.",
    "fieldname": "hostname",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -160,7 +149,7 @@
    "read_only": 1
   },
   {
-   "description": "Sub-zone the cluster owns, built from the label and the zone, e.g. blr.frappemail.com. Nodes, gateways and pools get single labels under it, and its wildcard certificate covers them.",
+   "description": "The region's zone, e.g. mail.blr.frappe.cloud. Nodes, gateways and pools get single labels under it, platform addresses live on it, and one wildcard certificate covers them.",
    "fieldname": "default_domain",
    "fieldtype": "Data",
    "label": "Default Domain",
@@ -177,20 +166,6 @@
    "fieldname": "placement_section",
    "fieldtype": "Section Break",
    "label": "Placement"
-  },
-  {
-   "default": "0",
-   "description": "Cluster Frappe Cloud uses when it names no cluster and no cluster serves the requested region. Only one cluster can be default.",
-   "fieldname": "is_default",
-   "fieldtype": "Check",
-   "label": "Is Default"
-  },
-  {
-   "description": "Region codes Frappe Cloud may place sites from, e.g. blr, sfo. Leave empty to serve any region. Placement policy only: the cluster's servers may sit anywhere.",
-   "fieldname": "regions",
-   "fieldtype": "Table",
-   "label": "Regions Served",
-   "options": "Stalwart Cluster Region"
   },
   {
    "fieldname": "stores_tab",
@@ -448,7 +423,7 @@
    "link_fieldname": "cluster"
   }
  ],
- "modified": "2026-10-09 12:48:09.582861",
+ "modified": "2026-10-09 13:07:07.419180",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Stalwart Cluster",

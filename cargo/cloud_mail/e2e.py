@@ -14,7 +14,6 @@ from cargo.cloud_mail.health.live import LiveHealth
 from cargo.cloud_mail.tenancy import sync
 from cargo.testing import make_dns_zone
 
-LABEL = "e2e"
 STORE_TITLE = "e2e RocksDb"
 
 
@@ -50,7 +49,7 @@ def prepare(atlas_url: str) -> None:
 		.insert()
 		.name
 	)
-	cluster_name = frappe.db.exists("Stalwart Cluster", {"label": LABEL, "dns_zone": zone.name})
+	cluster_name = frappe.db.exists("Stalwart Cluster", {"dns_zone": zone.name})
 	cluster = (
 		frappe.get_doc("Stalwart Cluster", cluster_name)
 		if cluster_name
@@ -58,12 +57,10 @@ def prepare(atlas_url: str) -> None:
 			{
 				"doctype": "Stalwart Cluster",
 				"title": "e2e",
-				"label": LABEL,
 				"dns_zone": zone.name,
 				"acme_contact_email": "ops@e2e.invalid",
 				"certificate_management": "Manual",
 				"data_store": store,
-				"regions": [{"region": LABEL}],
 			}
 		).insert()
 	)
@@ -73,7 +70,7 @@ def prepare(atlas_url: str) -> None:
 
 
 def _cluster():
-	name = frappe.db.get_value("Stalwart Cluster", {"label": LABEL})
+	name = frappe.db.get_value("Stalwart Cluster", {"title": "e2e"})
 	if not name:
 		frappe.throw("Run prepare first.")
 	return frappe.get_doc("Stalwart Cluster", name)

@@ -4,19 +4,19 @@ from cargo.cloud_mail.cluster.zone import build_domain_records, parse_zone_file
 from cargo.cloud_mail.tests.fake_stalwart import FakeStalwart
 
 ZONE = """
-example.com. 3600 IN MX 10 mail.blr.example.test.
+example.com. 3600 IN MX 10 mx.example.test.
 example.com. 3600 IN TXT "v=spf1 mx ra=postmaster -all"
 v1-rsa-20260101._domainkey.example.com. 3600 IN TXT "v=DKIM1; k=rsa; " "p=MIIBIjANBg"
 _dmarc.example.com. 3600 IN TXT "v=DMARC1; p=reject; rua=mailto:postmaster@example.com"
 _smtp._tls.example.com. 3600 IN TXT "v=TLSRPTv1; rua=mailto:postmaster@example.com"
 example.com. 3600 IN CAA 0 issue "letsencrypt.org"
-ua-auto-config.example.com. 3600 IN CNAME mail.blr.example.test.
+ua-auto-config.example.com. 3600 IN CNAME mx.example.test.
 _ua-auto-config.example.com. 3600 IN TXT "v=UAAC1; a=sha256; d=abc"
-mta-sts.example.com. 3600 IN CNAME mail.blr.example.test.
+mta-sts.example.com. 3600 IN CNAME mx.example.test.
 _mta-sts.example.com. 3600 IN TXT "v=STSv1; id=1"
-autoconfig.example.com. 3600 IN CNAME mail.blr.example.test.
-_imaps._tcp.example.com. 3600 IN SRV 0 1 993 mail.blr.example.test.
-other.org. 3600 IN MX 10 mail.blr.example.test.
+autoconfig.example.com. 3600 IN CNAME mx.example.test.
+_imaps._tcp.example.com. 3600 IN SRV 0 1 993 mx.example.test.
+other.org. 3600 IN MX 10 mx.example.test.
 v2-rsa-20260401._domainkey.example.com. IN TXT ( ; rotated key, written the way Stalwart does
     "v=DKIM1; k=rsa; h=sha256; p=MIIBIjANBgkq"
     "hkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA"
@@ -29,7 +29,7 @@ class TestZone(UnitTestCase):
 		records = parse_zone_file(ZONE)
 		self.assertEqual(records[0].name, "example.com")
 		self.assertEqual(records[0].type, "MX")
-		self.assertEqual(records[0].rdata, "10 mail.blr.example.test.")
+		self.assertEqual(records[0].rdata, "10 mx.example.test.")
 		self.assertEqual(records[2].rdata, '"v=DKIM1; k=rsa; " "p=MIIBIjANBg"')
 		multiline = records[-1]
 		self.assertEqual(
@@ -41,16 +41,16 @@ class TestZone(UnitTestCase):
 		)
 
 	def test_build_domain_records(self) -> None:
-		rows = build_domain_records("example.com", ZONE, spf_include="spf.blr.example.test")
+		rows = build_domain_records("example.com", ZONE, spf_include="spf.example.test")
 		by_category = {(r["category"], r["host"]): r for r in rows}
 
 		mx = by_category[("MX", "@")]
 		self.assertEqual(
 			(mx["record_type"], mx["priority"], mx["value"], mx["group"], mx["is_mandatory"]),
-			("MX", 10, "mail.blr.example.test", "routing_records", 0),
+			("MX", 10, "mx.example.test", "routing_records", 0),
 		)
 		spf = by_category[("SPF", "@")]
-		self.assertEqual(spf["value"], "v=spf1 include:spf.blr.example.test -all")
+		self.assertEqual(spf["value"], "v=spf1 include:spf.example.test -all")
 		self.assertEqual((spf["group"], spf["is_mandatory"]), ("authentication_records", 1))
 		dkim = by_category[("DKIM", "v1-rsa-20260101._domainkey")]
 		self.assertEqual(dkim["value"], "v=DKIM1; k=rsa; p=MIIBIjANBg")  # quoted chunks joined
@@ -64,7 +64,7 @@ class TestZone(UnitTestCase):
 		srv = by_category[("SRV", "_imaps._tcp")]  # targets the cluster host: no certificate needed
 		self.assertEqual(
 			(srv["group"], srv["priority"], srv["weight"], srv["port"], srv["value"]),
-			("discovery_records", 0, 1, 993, "mail.blr.example.test"),
+			("discovery_records", 0, 1, 993, "mx.example.test"),
 		)
 		self.assertEqual((mx["weight"], mx["port"]), (0, 0))
 		self.assertNotIn(("MTA-STS", "mta-sts"), by_category)
@@ -81,7 +81,7 @@ class TestZone(UnitTestCase):
 		self.assertEqual(by_category[("MTA-STS", "mta-sts")]["group"], "transport_security_records")
 		self.assertEqual(by_category[("MTA-STS", "_mta-sts")]["value"], "v=STSv1; id=1")
 		self.assertEqual(by_category[("Autoconfig", "autoconfig")]["group"], "autoconfig_records")
-		self.assertEqual(by_category[("UA Auto Config", "ua-auto-config")]["value"], "mail.blr.example.test")
+		self.assertEqual(by_category[("UA Auto Config", "ua-auto-config")]["value"], "mx.example.test")
 		self.assertEqual(
 			by_category[("UA Auto Config", "_ua-auto-config")]["value"], "v=UAAC1; a=sha256; d=abc"
 		)
