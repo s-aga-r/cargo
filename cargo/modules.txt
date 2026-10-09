@@ -4,3 +4,4 @@ Workflow Engine
 Image Builder
 Telemetry
 Cloud Mail
+Postgres

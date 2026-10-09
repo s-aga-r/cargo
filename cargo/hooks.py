@@ -277,6 +277,7 @@ scheduler_events = {
 			"cargo.cargo.doctype.machine.machine.sync_pending_machines",
 			"cargo.object_storage.spawn.ensure_cluster",
 			"cargo.telemetry.spawn.ensure_telemetry",
+			"cargo.postgres.spawn.ensure_postgres",
 			"cargo.image_builder.doctype.pilot_image.pilot_image.start_image_build_with_latest_pilot_release",
 			"cargo.image_builder.doctype.pilot_image.pilot_image.retry_failed_image_types_with_latest_version",
 			"cargo.image_builder.doctype.pilot_image.pilot_image.retire_older_images",
@@ -284,6 +285,7 @@ scheduler_events = {
 			# is what sets alerting latency; the read is two calls to the gateway.
 			"cargo.object_storage.health.refresh_health",
 			"cargo.cloud_mail.health.refresh_health",
+			"cargo.postgres.health.refresh_health",
 		],
 		# One SSH session per node, so five minutes rather than one. Nothing Garage
 		# exports moves meaningfully faster.
@@ -295,6 +297,7 @@ scheduler_events = {
 	"hourly": [
 		"cargo.object_storage.health.prune_history",
 		"cargo.cloud_mail.health.prune_history",
+		"cargo.postgres.health.prune_history",
 		# A customer domain goes live once its records resolve, and a DKIM key the cluster was
 		# still generating is picked up on the next pass. A failed lookup never turns one off.
 		"cargo.cloud_mail.doctype.mail_domain.mail_domain.refresh_rotating_domains",
@@ -305,6 +308,7 @@ scheduler_events = {
 	],
 	"daily": [
 		"cargo.backup.backup_database",
+		"cargo.postgres.backup.backup_databases",
 		"cargo.cargo.doctype.dns_record.dns_record.verify_all_dns_records",
 		"cargo.cloud_mail.doctype.stalwart_cluster.stalwart_cluster.check_all_clusters",
 		"cargo.cloud_mail.doctype.stalwart_node.stalwart_node.verify_all_ptr_records",

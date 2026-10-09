@@ -1,0 +1,187 @@
+{
+ "actions": [],
+ "creation": "2026-10-09 13:28:01.478364",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "machine_section",
+  "machine",
+  "base_image",
+  "column_break_state",
+  "status",
+  "health",
+  "health_reason",
+  "error",
+  "postgres_section",
+  "version",
+  "port",
+  "max_connections",
+  "column_break_secrets",
+  "admin_password",
+  "backup_bucket",
+  "setup_section",
+  "setup_log",
+  "auto_spawn",
+  "auto_setup_attempts"
+ ],
+ "fields": [
+  {
+   "fieldname": "machine_section",
+   "fieldtype": "Section Break",
+   "label": "Machine"
+  },
+  {
+   "fieldname": "machine",
+   "fieldtype": "Link",
+   "label": "Machine",
+   "options": "Machine",
+   "read_only": 1
+  },
+  {
+   "description": "Atlas image the machine boots from. Blank picks the base image.",
+   "fieldname": "base_image",
+   "fieldtype": "Data",
+   "label": "Base Image"
+  },
+  {
+   "fieldname": "column_break_state",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Draft",
+   "description": "Draft: no machine set up yet. Setting Up: installing Postgres. Active: serving on the mesh. Failed: the last run could not; see Error.",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nSetting Up\nActive\nFailed",
+   "read_only": 1
+  },
+  {
+   "default": "Unknown",
+   "description": "How the server is doing right now, read every minute over the mesh. Unknown until it first serves.",
+   "fieldname": "health",
+   "fieldtype": "Select",
+   "label": "Health",
+   "options": "Unknown\nHealthy\nDegraded\nCritical",
+   "read_only": 1
+  },
+  {
+   "depends_on": "health_reason",
+   "fieldname": "health_reason",
+   "fieldtype": "Data",
+   "label": "Health Reason",
+   "read_only": 1
+  },
+  {
+   "depends_on": "error",
+   "fieldname": "error",
+   "fieldtype": "Long Text",
+   "label": "Error",
+   "max_height": "16rem",
+   "read_only": 1
+  },
+  {
+   "fieldname": "postgres_section",
+   "fieldtype": "Section Break",
+   "label": "Postgres"
+  },
+  {
+   "default": "16",
+   "description": "The PostgreSQL major version apt installs. Ubuntu 24.04 ships 16.",
+   "fieldname": "version",
+   "fieldtype": "Data",
+   "label": "Version",
+   "reqd": 1
+  },
+  {
+   "default": "5432",
+   "fieldname": "port",
+   "fieldtype": "Int",
+   "label": "Port",
+   "reqd": 1
+  },
+  {
+   "default": "200",
+   "description": "Every consumer's pool is sized against this: the mail spawner refuses a pool that would exceed it.",
+   "fieldname": "max_connections",
+   "fieldtype": "Int",
+   "label": "Max Connections",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_secrets",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "The role Cargo connects as to create databases and read health: CREATEDB and CREATEROLE, not superuser.",
+   "fieldname": "admin_password",
+   "fieldtype": "Password",
+   "label": "Admin Password",
+   "read_only": 1
+  },
+  {
+   "description": "Where the nightly dumps go, made on the region's object storage once that serves.",
+   "fieldname": "backup_bucket",
+   "fieldtype": "Link",
+   "label": "Backup Bucket",
+   "options": "Bucket",
+   "read_only": 1
+  },
+  {
+   "fieldname": "setup_section",
+   "fieldtype": "Section Break",
+   "label": "Setup"
+  },
+  {
+   "description": "Everything the install script printed, as it printed it.",
+   "fieldname": "setup_log",
+   "fieldtype": "Code",
+   "label": "Setup Log",
+   "max_height": "24rem",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Cargo created this server and keeps it moving. One added by hand is never advanced on its own.",
+   "fieldname": "auto_spawn",
+   "fieldtype": "Check",
+   "label": "Auto Spawn",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "depends_on": "auto_spawn",
+   "fieldname": "auto_setup_attempts",
+   "fieldtype": "Int",
+   "label": "Auto Setup Attempts",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-10-09 13:28:01.478364",
+ "modified_by": "Administrator",
+ "module": "Postgres",
+ "name": "Postgres Server",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "issingle": 1
+}

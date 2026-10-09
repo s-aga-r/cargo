@@ -67,14 +67,16 @@ def backup_database() -> None:
 	prune_dumps(client, prefix)
 
 
-def prune_dumps(client, prefix: str, retention_days: int = RETENTION_DAYS) -> list[str]:
+def prune_dumps(
+	client, prefix: str, retention_days: int = RETENTION_DAYS, bucket: str = BUCKET_NAME
+) -> list[str]:
 	"""Delete every object under `prefix` older than the window; returns what went."""
 	cutoff = datetime.now(UTC) - timedelta(days=retention_days)
 	expired = []
 	token = None
 	while True:
 		page = client.list_objects_v2(
-			Bucket=BUCKET_NAME, Prefix=prefix, **({"ContinuationToken": token} if token else {})
+			Bucket=bucket, Prefix=prefix, **({"ContinuationToken": token} if token else {})
 		)
 		expired += [item["Key"] for item in page.get("Contents", []) if item["LastModified"] < cutoff]
 		token = page.get("NextContinuationToken")
@@ -82,5 +84,5 @@ def prune_dumps(client, prefix: str, retention_days: int = RETENTION_DAYS) -> li
 			break
 	for start in range(0, len(expired), 1000):
 		chunk = expired[start : start + 1000]
-		client.delete_objects(Bucket=BUCKET_NAME, Delete={"Objects": [{"Key": key} for key in chunk]})
+		client.delete_objects(Bucket=bucket, Delete={"Objects": [{"Key": key} for key in chunk]})
 	return expired
