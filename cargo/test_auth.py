@@ -322,3 +322,17 @@ class UnitTestAuthenticateRequest(UnitTestCase):
 		with patch("frappe.get_request_header", return_value="   "):
 			with self.assertRaises(frappe.AuthenticationError):
 				authenticate_request(("bucket:*",))
+
+
+class UnitTestCentralOnlyScopes(UnitTestCase):
+	"""Atlas may vouch for buckets; what mail and the SFU hand out is Central's alone."""
+
+	def test_an_atlas_signed_token_may_carry_bucket_but_not_mail_or_sfu_scopes(self):
+		from cargo.auth import token_is_coherent
+
+		atlas = {"iss": "atlas:1", "sub": "atlas"}
+		self.assertTrue(token_is_coherent({**atlas, "scope": "bucket:*"}))
+		self.assertFalse(token_is_coherent({**atlas, "scope": "sfu:*"}))
+		self.assertFalse(token_is_coherent({**atlas, "scope": "mail:*"}))
+		self.assertFalse(token_is_coherent({**atlas, "scope": "mail:domain"}))
+		self.assertTrue(token_is_coherent({"iss": "central", "sub": "central", "scope": "sfu:*"}))

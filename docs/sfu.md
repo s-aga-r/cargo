@@ -36,4 +36,6 @@ Every minute Cargo asks `https://<hostname>/health`, as a browser would. Anythin
 
 ## Not here
 
+The firewall asks Atlas for the media ports as one range, `40000-40003` for four workers; `docs/atlas-contract.md` does not spell out a range syntax, so this is confirmed with Atlas before the first SFU machine is rented.
+
 Captions need a separate speech-to-text server, which this does not run; the deployment keeps the Suite default for `STT_SERVER_URL`. Log shipping to the Suite project's Alloy and Loki is off. The deployment pulls a `latest` image unless `image` pins one.

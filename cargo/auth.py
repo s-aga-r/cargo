@@ -17,9 +17,11 @@ TOKEN_HEADER = "X-Cargo-Access-Token"
 CENTRAL_ISSUER = "central"
 ALGORITHM = "EdDSA"
 SITE_CLAIM = "site"
-# The scope a site's own token carries; the wide ones are Central's and Atlas's alone.
+# The scope a site's own token carries; the wide ones are never a site's. Of those, only
+# `bucket:*` may come from Atlas: everything about mail and the SFU is Central's to say.
 SITE_SCOPE = "mail"
 WIDE_SCOPES = frozenset({"mail:*", "bucket:*", "sfu:*"})
+CENTRAL_ONLY_SCOPES = frozenset({"sfu:*"})
 
 jwks_clients: dict[str, PyJWKClient] = {}
 
@@ -68,12 +70,16 @@ def token_scopes(claims: dict[str, Any]) -> set[str]:
 
 def token_is_coherent(claims: dict[str, Any]) -> bool:
 	"""Who signed a token limits what it may say. Only Central names a site or hands out a mail
-	scope; a site's token is bound to that site and never carries a wider power; a site scope
+	or SFU scope; a site's token is bound to that site and never carries a wider power; a site scope
 	without a site binds to nothing."""
 	scopes = token_scopes(claims)
 	site = claims.get(SITE_CLAIM)
-	mail = {scope for scope in scopes if scope == SITE_SCOPE or scope.startswith("mail:")}
-	if (site or mail) and claims.get("iss") != CENTRAL_ISSUER:
+	central_only = {
+		scope
+		for scope in scopes
+		if scope == SITE_SCOPE or scope.startswith("mail:") or scope in CENTRAL_ONLY_SCOPES
+	}
+	if (site or central_only) and claims.get("iss") != CENTRAL_ISSUER:
 		return False
 	if site and scopes & WIDE_SCOPES:
 		return False
