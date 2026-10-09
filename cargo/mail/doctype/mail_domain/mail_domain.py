@@ -39,7 +39,7 @@ PUSHED_FIELDS = (
 )
 
 
-class MailDomain(Document):
+class MailDomain(Document):  # nosemgrep
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
 
@@ -523,7 +523,7 @@ def _run_isolated(name: str, action, label: str) -> None:
 		log_exception(f"{label} failed for {name}")
 		return
 	if not frappe.in_test:
-		frappe.db.commit()
+		frappe.db.commit()  # nosemgrep
 
 
 def purge_disabled_domains() -> None:

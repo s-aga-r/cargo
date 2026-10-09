@@ -57,13 +57,14 @@ class PostgresDatabase(Document):
 		self.password = frappe.generate_hash(length=SECRET_LENGTH)
 		# Idempotent: a run rolled back after the server did its part leaves the role and the
 		# database behind, and the next run must take them over rather than trip on them.
-		statements = [
-			"DO $$ BEGIN "
-			f"IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = {literal(self.username)}) THEN "
-			f"ALTER ROLE {identifier(self.username)} LOGIN PASSWORD {literal(self.password)}; "
-			f"ELSE CREATE ROLE {identifier(self.username)} LOGIN PASSWORD {literal(self.password)}; "
-			"END IF; END $$"
-		]
+		role = identifier(self.username)
+		password = literal(self.password)
+		ensure_role = (
+			f"DO $$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = {literal(self.username)}) "
+			f"THEN ALTER ROLE {role} LOGIN PASSWORD {password}; "
+			f"ELSE CREATE ROLE {role} LOGIN PASSWORD {password}; END IF; END $$"
+		)
+		statements = [ensure_role]
 		if not query(server, "SELECT 1 FROM pg_database WHERE datname = %s", (self.database_name,)):
 			statements.append(
 				f"CREATE DATABASE {identifier(self.database_name)} OWNER {identifier(self.username)}"
@@ -78,8 +79,7 @@ class PostgresDatabase(Document):
 		run(
 			self.get_server(),
 			[
-				"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-				f"WHERE datname = {literal(self.database_name)} AND pid <> pg_backend_pid()",
+				f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = {literal(self.database_name)} AND pid <> pg_backend_pid()",
 				f"DROP DATABASE IF EXISTS {identifier(self.database_name)}",
 				f"DROP ROLE IF EXISTS {identifier(self.username)}",
 			],

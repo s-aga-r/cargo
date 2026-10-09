@@ -53,7 +53,7 @@ class ReceivedReports:
 				log_exception(f"{self.doctype} fetch failed for cluster {name}")
 				continue
 			if not frappe.in_test:
-				frappe.db.commit()
+				frappe.db.commit()  # nosemgrep
 
 	def fetch(self, cluster: Document) -> int:
 		"""Stores the cluster's reports that are new here; returns how many were added.

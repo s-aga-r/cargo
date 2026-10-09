@@ -160,7 +160,8 @@ def add_node(cluster: StalwartCluster, config: dict) -> None:
 		return
 	report(cluster, "")
 	if not frappe.flags.in_test:
-		frappe.db.commit()  # nosemgrep: each machine in a transaction of its own, as object storage does
+		# each machine in a transaction of its own, as object storage does
+		frappe.db.commit()  # nosemgrep
 
 
 def advance(cluster: StalwartCluster) -> None:

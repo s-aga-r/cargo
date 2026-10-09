@@ -225,7 +225,7 @@ def verify_all_dns_records() -> None:
 		doc.verify_dns_record(save=True)
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def enqueue_verify_all_dns_records() -> None:
 	frappe.only_for("System Manager")
 

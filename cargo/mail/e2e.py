@@ -6,6 +6,7 @@ Every function prints `key=value` lines for the shell to read."""
 from __future__ import annotations
 
 import frappe
+from frappe import _
 from frappe.utils import cint
 from frappe.utils.password import set_encrypted_password
 
@@ -19,7 +20,7 @@ def prepare(atlas_url: str) -> None:
 	"""Point Cargo at fake_atlas and give it a provider-less zone and a RocksDb cluster."""
 	settings = frappe.get_single("Cargo Settings")
 	if not settings.wildcard_domain:
-		frappe.throw("Cargo Settings needs a wildcard domain; the zone hangs off it.")
+		frappe.throw(_("Cargo Settings needs a wildcard domain; the zone hangs off it."))
 	zone = make_dns_zone(f"mail.{settings.wildcard_domain}", default=False)
 	# Written field by field: a development site may not have every other setting filled in.
 	frappe.db.set_single_value(
@@ -48,7 +49,8 @@ def prepare(atlas_url: str) -> None:
 			}
 		).insert()
 	)
-	frappe.db.commit()  # nosemgrep: bench execute runs outside a request
+	# bench execute runs outside a request
+	frappe.db.commit()  # nosemgrep
 	print(f"cluster={cluster.name}")
 	print(f"hosts=127.0.0.1 {cluster.hostname} n1.{cluster.default_domain}")
 
@@ -56,7 +58,7 @@ def prepare(atlas_url: str) -> None:
 def _cluster():
 	name = frappe.db.get_value("Stalwart Cluster", {"title": "e2e"})
 	if not name:
-		frappe.throw("Run prepare first.")
+		frappe.throw(_("Run prepare first."))
 	return frappe.get_doc("Stalwart Cluster", name)
 
 
@@ -64,7 +66,7 @@ def _node():
 	cluster = _cluster()
 	name = frappe.db.get_value("Stalwart Node", {"cluster": cluster.name})
 	if not name:
-		frappe.throw("Run request_node first.")
+		frappe.throw(_("Run request_node first."))
 	return frappe.get_doc("Stalwart Node", name)
 
 

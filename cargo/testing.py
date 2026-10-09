@@ -138,14 +138,15 @@ def as_request(token: str | None, request_ip: str | None = None, path: str = "/a
 		getattr(frappe.local, "request", None),
 		getattr(frappe.local, "request_ip", None),
 	)
-	frappe.set_user("Guest")
+	# A guest request, as the API sees one; the user is put back below.
+	frappe.set_user("Guest")  # nosemgrep
 	frappe.local.request = frappe._dict(headers={TOKEN_HEADER: token} if token else {}, path=path)
 	frappe.local.request_ip = request_ip
 	frappe.local.request_claims = None
 	try:
 		yield
 	finally:
-		frappe.set_user(before[0])
+		frappe.set_user(before[0])  # nosemgrep
 		frappe.local.request = before[1]
 		frappe.local.request_ip = before[2]
 		frappe.local.request_claims = None

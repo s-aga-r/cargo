@@ -210,11 +210,13 @@ def run_over_ssh(
 
 	with tempfile.NamedTemporaryFile("w", delete=False) as key_file:
 		key_file.write(key if key.endswith("\n") else f"{key}\n")
+		key_file.flush()
 		path = key_file.name
 	os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
 	with tempfile.NamedTemporaryFile("w", delete=False) as hosts_file:
 		if pin and pin.known:
 			hosts_file.write(f"{pin.known}\n")
+		hosts_file.flush()
 		hosts_path = hosts_file.name
 	checking = "yes" if pin and pin.known else "accept-new"
 

@@ -94,7 +94,8 @@ def render(directory: str) -> None:
 		path = target / filename
 		path.touch(mode=0o600)
 		path.write_text(script(*SCRIPTS, filename, environment=env))
-	frappe.db.commit()  # nosemgrep: bench execute runs outside a request
+	# bench execute runs outside a request
+	frappe.db.commit()  # nosemgrep
 	print(f"cluster={cluster.name}")
 	print(f"hostname={cluster.hostname}")
 	print(f"marker={plan.marker(plan.recovery_plan(cluster))}")

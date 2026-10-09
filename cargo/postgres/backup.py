@@ -53,7 +53,8 @@ def backup_databases() -> None:
 	if not bucket:
 		return
 	if not frappe.flags.in_test:
-		frappe.db.commit()  # nosemgrep: the bucket is on Garage now; a failed dump must not forget it
+		# the bucket is on Garage now; a failed dump must not forget it
+		frappe.db.commit()  # nosemgrep
 
 	machine = frappe.get_doc("Machine", server.machine)
 	environment = backup_environment(server, bucket, databases)

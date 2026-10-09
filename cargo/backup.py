@@ -57,7 +57,8 @@ def backup_database() -> None:
 		return
 
 	if not frappe.flags.in_test:
-		frappe.db.commit()  # nosemgrep: the bucket is on Garage now; a failure below must not forget it
+		# the bucket is on Garage now; a failure below must not forget it
+		frappe.db.commit()  # nosemgrep
 
 	# The database only. site_config.json carries the encryption key that reads the dump's
 	# secrets, and that key is the operator's to keep out of the region.

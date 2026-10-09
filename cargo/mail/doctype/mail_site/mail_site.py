@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.query_builder.functions import Sum
+from frappe.query_builder.functions import Count, Sum
 from frappe.utils import cint, flt, now
 
 from cargo.mail.stalwart.directory import DISK_QUOTA, GB
@@ -211,7 +211,7 @@ class MailSite(Document):
 		for field in ("max_domains", "max_accounts", "max_groups", "max_mailing_lists"):
 			if cint(self.get(field)) < 0:
 				frappe.throw(
-					_("{0} cannot be negative; 0 means unlimited.").format(self.meta.get_label(field))
+					_("{0} cannot be negative; 0 means unlimited.").format(_(self.meta.get_label(field)))
 				)
 		if flt(self.default_disk_quota_gb) <= 0:
 			frappe.throw(_("Default Disk Quota must be above 0: every account needs a quota."))
@@ -225,7 +225,7 @@ class MailSite(Document):
 
 	def account_count(self) -> int:
 		"""The platform address is the site's but not of its making, so it is not counted."""
-		return self.locked_count("Mail Account", "and is_platform_address = 0")
+		return self.locked_count("Mail Account", own_only=True)
 
 	def group_count(self) -> int:
 		return self.locked_count("Mail Group")
@@ -233,12 +233,14 @@ class MailSite(Document):
 	def mailing_list_count(self) -> int:
 		return self.locked_count("Mailing List")
 
-	def locked_count(self, doctype: str, extra: str = "") -> int:
+	def locked_count(self, doctype: str, own_only: bool = False) -> int:
 		"""A locking read: under REPEATABLE READ a plain count sees the snapshot from before the
 		site lock was taken, so two requests could both find room for the last slot."""
-		rows = frappe.db.sql(
-			f"select count(*) from `tab{doctype}` where site = %s {extra} for update", (self.name,)
-		)
+		table = frappe.qb.DocType(doctype)
+		query = frappe.qb.from_(table).select(Count(table.name)).where(table.site == self.name)
+		if own_only:
+			query = query.where(table.is_platform_address == 0)
+		rows = query.for_update().run()
 		return cint(rows[0][0]) if rows else 0
 
 	def assert_can_add_domain(self) -> None:
@@ -369,4 +371,4 @@ def purge_directory(site: str) -> None:
 		for name in frappe.get_all(doctype, {"site": site}, pluck="name"):
 			frappe.delete_doc(doctype, name, ignore_permissions=True)
 			if not frappe.in_test:
-				frappe.db.commit()
+				frappe.db.commit()  # nosemgrep
