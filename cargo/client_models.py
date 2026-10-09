@@ -5,12 +5,15 @@ from typing import Any, Literal
 
 # Every role any service asks Atlas for. A machine's role is what its owner does with it,
 # so they live together rather than one list per service.
-Role = Literal["gateway", "storage", "telemetry", "builder"]
+Role = Literal["gateway", "storage", "telemetry", "builder", "mail", "postgres", "valkey"]
 
 GATEWAY: Role = "gateway"
 STORAGE: Role = "storage"
 TELEMETRY: Role = "telemetry"
 BUILDER: Role = "builder"
+MAIL: Role = "mail"
+POSTGRES: Role = "postgres"
+VALKEY: Role = "valkey"
 
 
 @dataclass
