@@ -1,5 +1,6 @@
 import io
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import patch
 
 import frappe
@@ -58,7 +59,7 @@ class FakeSsh:
 	"""Stands in for the ssh binary: notes the options it was given and writes the host key it
 	"saw" into the known-hosts file, as ssh does on first contact."""
 
-	output = ["ok\n"]
+	output: ClassVar[list[str]] = ["ok\n"]
 	returncode = 0
 
 	def __init__(self, args, **kwargs) -> None:
@@ -124,7 +125,7 @@ class UnitTestMasking(UnitTestCase):
 
 	def test_output_and_the_error_tail_are_masked(self):
 		class Chatty(FakeSsh):
-			output = ["export TOKEN=hunter2\n", 'rejected {"secret":"hunter2"}\n']
+			output: ClassVar[list[str]] = ["export TOKEN=hunter2\n", 'rejected {"secret":"hunter2"}\n']
 			returncode = 1
 
 		seen = []
