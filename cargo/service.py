@@ -78,7 +78,25 @@ def publish_routes(domains: Iterable[str], address: str) -> None:
 		client.map_domain(domain, address)
 
 
+def release_machine(doc: Document, allowed_statuses: tuple[str, ...], **cleared) -> None:
+	"""Let a service's machine go so another can be asked for on the same record. A machine
+	still running is terminated first; one Atlas refuses to end stays, since it still costs
+	money and the record must say so."""
+	if doc.status not in allowed_statuses:
+		frappe.throw(_("Only a {0} record releases its machine.").format(" or ".join(allowed_statuses)))
+	if not doc.machine:
+		frappe.throw(_("There is no machine to release."))
+	machine = frappe.get_doc("Machine", doc.machine)
+	if machine.status not in DEAD_MACHINE_STATES and not machine.terminate():
+		frappe.throw(_("Atlas refused to terminate {0}; see the Error Log.").format(machine.name))
+	doc.db_set({"machine": None, **cleared}, update_modified=False)
+
+
 def mark(doc: Document, status: str, error: str | None = None) -> None:
+	"""Set and save, so the record's webhook fires. Reloaded first: a flow holds its copy across
+	long tasks while health writes to the row every minute."""
+	if not doc.is_new():
+		doc.reload()
 	doc.status = status
 	doc.error = error
 	doc.save()

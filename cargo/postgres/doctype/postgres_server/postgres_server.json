@@ -21,6 +21,7 @@
   "backup_bucket",
   "setup_section",
   "setup_log",
+  "backup_log",
   "auto_spawn",
   "auto_setup_attempts"
  ],
@@ -143,6 +144,14 @@
    "read_only": 1
   },
   {
+   "description": "What the last nightly dump printed.",
+   "fieldname": "backup_log",
+   "fieldtype": "Code",
+   "label": "Backup Log",
+   "max_height": "16rem",
+   "read_only": 1
+  },
+  {
    "default": "0",
    "description": "Cargo created this server and keeps it moving. One added by hand is never advanced on its own.",
    "fieldname": "auto_spawn",
@@ -162,7 +171,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-09 13:28:01.478364",
+ "modified": "2026-10-09 14:57:25.632360",
  "modified_by": "Administrator",
  "module": "Postgres",
  "name": "Postgres Server",

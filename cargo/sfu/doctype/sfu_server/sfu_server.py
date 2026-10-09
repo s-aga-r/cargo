@@ -12,7 +12,7 @@ from cargo.cargo.doctype.dns_record.dns_record import reconcile_managed_records
 from cargo.cargo.doctype.dns_zone.dns_zone import settings_zone
 from cargo.cargo.doctype.machine.machine import DEAD_MACHINE_STATES, Machine
 from cargo.client_models import SFU, NodeSpec
-from cargo.service import ANYWHERE, configure_service_webhook, firewall, firewall_rule, mark
+from cargo.service import ANYWHERE, configure_service_webhook, firewall, firewall_rule, mark, release_machine
 from cargo.ssh import OutputLog, run_over_ssh, script
 from cargo.workflow_engine.doctype.press_workflow.decorators import flow, task
 from cargo.workflow_engine.doctype.press_workflow.workflow_builder import WorkflowBuilder
@@ -122,6 +122,15 @@ class SFUServer(WorkflowBuilder):
 		if machine.public_ipv4 and self.ipv4_address != machine.public_ipv4:
 			self.db_set("ipv4_address", machine.public_ipv4)
 			self.publish_address()
+
+	@frappe.whitelist()
+	def release_machine(self) -> None:
+		"""Let a dead or failed machine go; the hostname's record goes with its address."""
+		frappe.only_for("System Manager")
+		release_machine(self, ("Draft", "Failed"), ipv4_address=None)
+		self.reload()
+		self.publish_address()
+		self.mark("Draft")
 
 	def publish_address(self) -> None:
 		"""The hostname's A record in Cargo's zone, which the certificate authority resolves."""

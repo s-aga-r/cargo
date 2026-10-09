@@ -11,7 +11,7 @@ from cargo.atlas_client import base_image_id
 from cargo.cargo.doctype.machine.machine import Machine
 from cargo.client_models import POSTGRES, NodeSpec
 from cargo.postgres.client import ADMIN_ROLE
-from cargo.service import MESH_NETWORK, configure_service_webhook, mark, single_machine_sync
+from cargo.service import MESH_NETWORK, configure_service_webhook, mark, release_machine, single_machine_sync
 from cargo.ssh import OutputLog, run_over_ssh, script
 from cargo.workflow_engine.doctype.press_workflow.decorators import flow, task
 from cargo.workflow_engine.doctype.press_workflow.workflow_builder import WorkflowBuilder
@@ -39,6 +39,7 @@ class PostgresServer(WorkflowBuilder):
 		auto_setup_attempts: DF.Int
 		auto_spawn: DF.Check
 		backup_bucket: DF.Link | None
+		backup_log: DF.Code | None
 		base_image: DF.Data | None
 		error: DF.LongText | None
 		health: DF.Literal["Unknown", "Healthy", "Degraded", "Critical"]
@@ -149,6 +150,14 @@ class PostgresServer(WorkflowBuilder):
 			"ADMIN_ROLE": ADMIN_ROLE,
 			"ADMIN_PASSWORD": self.get_password("admin_password"),
 		}
+
+	@frappe.whitelist()
+	def release_machine(self) -> None:
+		"""Let a dead or failed machine go; the next one is asked for on the same record."""
+		frappe.only_for("System Manager")
+		release_machine(self, ("Draft", "Failed"))
+		self.reload()
+		self.mark("Draft")
 
 	def sync_machines(self) -> None:
 		single_machine_sync(self)

@@ -269,7 +269,7 @@ class ObjectStorageCluster(WorkflowBuilder):
 			except Exception:
 				frappe.log_error(
 					title=f"{machine.name} failed to set up",
-					message=frappe.get_traceback(with_context=True),
+					message=frappe.get_traceback(with_context=False),
 				)
 				return False
 
@@ -286,7 +286,7 @@ class ObjectStorageCluster(WorkflowBuilder):
 			except Exception:
 				frappe.log_error(
 					title=f"{self.name} gateway routing failed",
-					message=frappe.get_traceback(with_context=True),
+					message=frappe.get_traceback(with_context=False),
 				)
 				return False
 

@@ -25,6 +25,13 @@ frappe.ui.form.on("SFU Server", {
 				)
 			).addClass(first ? "btn-primary" : "");
 		}
+		if (frm.doc.machine && ["Draft", "Failed"].includes(frm.doc.status)) {
+			frm.add_custom_button(__("Release Machine"), () =>
+				frappe.confirm(__("Let this machine go? Atlas terminates it if it still runs."), () =>
+					frm.call("release_machine").then(() => frm.reload_doc())
+				)
+			);
+		}
 		if (frm.doc.auto_spawn && frm.doc.auto_setup_attempts) {
 			frm.add_custom_button(__("Reset Setup Attempts"), () =>
 				frm.call("reset_auto_setup_attempts").then(() => frm.reload_doc())

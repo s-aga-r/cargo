@@ -85,9 +85,14 @@ class Machine(Document):
 				"ssh_public_key": public_key,
 				"ssh_private_key": private_key,
 			}
-		).insert(ignore_permissions=True)
-
-		machine.vm_id = machine.build(spec, base_image, public_ipv4=public_ipv4, firewall=firewall)
+		)
+		frappe.db.savepoint("machine_request")
+		machine.insert(ignore_permissions=True)
+		try:
+			machine.vm_id = machine.build(spec, base_image, public_ipv4=public_ipv4, firewall=firewall)
+		except Exception:
+			frappe.db.rollback(save_point="machine_request")  # no row may claim a VM that was never made
+			raise
 		machine.record("Pending")
 		return machine
 
@@ -113,7 +118,7 @@ class Machine(Document):
 		except Exception:
 			frappe.log_error(
 				title=f"{self.reference_name} could not add a {self.role} machine",
-				message=frappe.get_traceback(with_context=True),
+				message=frappe.get_traceback(with_context=False),
 			)
 			frappe.throw(_("Atlas would not build this machine. See the Error Log."))
 
@@ -150,7 +155,7 @@ class Machine(Document):
 		except Exception:
 			frappe.log_error(
 				title=f"Could not terminate {self.role} machine {self.name}",
-				message=frappe.get_traceback(with_context=True),
+				message=frappe.get_traceback(with_context=False),
 			)
 			self.record("Broken")
 			return False

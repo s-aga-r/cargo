@@ -6,10 +6,11 @@ import frappe
 
 from cargo.backup import prune_dumps, s3_client
 from cargo.postgres.doctype.postgres_server.postgres_server import BACKUP_BUCKET, PostgresServer
-from cargo.ssh import OutputLog, run_over_ssh, script
+from cargo.ssh import run_over_ssh, script
 
 CONF = ("postgres", "conf", "postgres", "backup.sh")
 BACKUP_TIMEOUT = 60 * 60
+LOG_LIMIT = 20_000
 RETENTION_DAYS = 30
 
 
@@ -56,20 +57,25 @@ def backup_databases() -> None:
 
 	machine = frappe.get_doc("Machine", server.machine)
 	environment = backup_environment(server, bucket, databases)
-	with OutputLog(server, "setup_log", append=True) as log:
-		try:
-			run_over_ssh(
-				machine.address,
-				script(*CONF, environment=environment),
-				machine.get_password("ssh_private_key"),
-				timeout=BACKUP_TIMEOUT,
-				on_output=log.write,
-				pin=machine.host_key_pin(),
-				secrets=[environment["S3_SECRET_KEY"]],
-			)
-		except Exception:
-			frappe.log_error(title="Postgres dump failed", message=frappe.get_traceback(with_context=False))
-			return
+	# Its own log, written whole at the end: the setup log belongs to setup runs, which may be
+	# streaming into it at the same time.
+	lines: list[str] = []
+	try:
+		run_over_ssh(
+			machine.address,
+			script(*CONF, environment=environment),
+			machine.get_password("ssh_private_key"),
+			timeout=BACKUP_TIMEOUT,
+			on_output=lines.append,
+			pin=machine.host_key_pin(),
+			secrets=[environment["S3_SECRET_KEY"]],
+		)
+	except Exception:
+		lines.append(frappe.get_traceback(with_context=False))
+		frappe.log_error(title="Postgres dump failed", message=frappe.get_traceback(with_context=False))
+		return
+	finally:
+		server.db_set("backup_log", "".join(lines)[-LOG_LIMIT:], update_modified=False)
 	client = s3_client(bucket)
 	for database in databases:
 		prune_dumps(client, f"{database}/", RETENTION_DAYS, bucket=bucket.bucket_name)

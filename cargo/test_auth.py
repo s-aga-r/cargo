@@ -165,8 +165,11 @@ class UnitTestAccessToken(UnitTestCase):
 			headers={"kid": KEY_ID},
 		)
 
-		with patch("cargo.auth.jwks_client") as client:
-			self.assertIsNone(self.claims_of(token))
+		with (
+			patch("frappe.get_cached_doc", return_value=SETTINGS),
+			patch("cargo.auth.jwks_client") as client,
+		):
+			self.assertIsNone(token_claims(token))
 
 		client.assert_not_called()
 

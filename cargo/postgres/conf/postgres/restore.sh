@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runs over SSH on the Postgres machine. Brings one database back from a dump in the
-# region's object storage: the database is created if it is missing, its owner must exist.
+# region's object storage: whatever is there is dropped and the dump loaded into a fresh
+# database owned by OWNER, which must exist.
 set -euo pipefail
 
 : "${DATABASE:?DATABASE is required}"

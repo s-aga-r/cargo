@@ -183,7 +183,7 @@ class DatumServer(WorkflowBuilder):
 			except Exception:
 				frappe.log_error(
 					title=f"{self.name} failed to set up",
-					message=frappe.get_traceback(with_context=True),
+					message=frappe.get_traceback(with_context=False),
 				)
 				self.mark("Failed", "datum did not install. See the Setup Log.")
 				return False
@@ -209,7 +209,7 @@ class DatumServer(WorkflowBuilder):
 			except Exception:
 				frappe.log_error(
 					title=f"{self.name} could not be routed to",
-					message=frappe.get_traceback(with_context=True),
+					message=frappe.get_traceback(with_context=False),
 				)
 				self.mark("Failed", "nginx did not come up. See the Setup Log.")
 				return False

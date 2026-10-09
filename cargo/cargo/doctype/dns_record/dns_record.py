@@ -177,13 +177,22 @@ def reconcile_managed_records(owner_doctype: str, owner: str, desired: list[dict
 	existing = frappe.get_all(
 		"DNS Record",
 		filters={"managed_by_doctype": owner_doctype, "managed_by": owner},
-		fields=["name", "dns_zone", "host", "type", "value"],
+		fields=["name", "dns_zone", "host", "type", "value", "ttl", "priority"],
 	)
 
 	for record in existing:
 		key = (record.dns_zone, record.host, record.type, (record.value or "").strip())
 		if key in wanted:
-			wanted.pop(key)
+			row = wanted.pop(key)
+			changes = {
+				field: row[field]
+				for field in ("ttl", "priority")
+				if row.get(field) is not None and cint(row[field]) != cint(record.get(field))
+			}
+			if changes:
+				doc = frappe.get_doc("DNS Record", record.name)
+				doc.update(changes)
+				doc.save(ignore_permissions=True)
 		else:
 			frappe.delete_doc("DNS Record", record.name, ignore_permissions=True, force=True)
 
@@ -200,8 +209,20 @@ def delete_managed_records(owner_doctype: str, owner: str) -> None:
 
 
 def verify_all_dns_records() -> None:
-	for name in frappe.get_all("DNS Record", pluck="name"):
-		frappe.get_doc("DNS Record", name).verify_dns_record(save=True)
+	"""Daily: resolve every record, and push again any unverified record whose zone has a
+	provider, since a push that failed once (a provider outage) is otherwise never retried."""
+	provided = {
+		zone.name
+		for zone in frappe.get_all("DNS Zone", {"dns_provider": ("is", "set"), "enabled": 1}, ["name"])
+	}
+	for row in frappe.get_all("DNS Record", ["name", "dns_zone", "is_verified"]):
+		doc = frappe.get_doc("DNS Record", row.name)
+		if not row.is_verified and row.dns_zone in provided:
+			try:
+				doc.create_or_update_record_in_dns_provider()
+			except Exception:
+				frappe.log_error(title=f"DNS Record {row.name} could not be pushed")
+		doc.verify_dns_record(save=True)
 
 
 @frappe.whitelist()

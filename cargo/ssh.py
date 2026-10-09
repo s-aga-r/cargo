@@ -254,6 +254,9 @@ def run_over_ssh(
 		process.wait()
 	finally:
 		watchdog.cancel()
+		if process.poll() is None:  # the read loop was interrupted by something other than the watchdog
+			process.kill()
+			process.wait()
 		os.unlink(path)
 		if pin and not pin.known and (presented := Path(hosts_path).read_text().strip()):
 			pin.record(presented)

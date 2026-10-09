@@ -67,11 +67,20 @@ class FakeSsh:
 		self.stdin = io.StringIO()
 		self.stdout = iter(self.output)
 		hosts = next(a for a in args if a.startswith("UserKnownHostsFile=")).split("=", 1)[1]
+		# What ssh would do: with checking on, a key must already be in the file; on first contact
+		# the presented key is written to it.
+		self.known_hosts = Path(hosts).read_text().strip()
+		if self.option("StrictHostKeyChecking") == "yes" and self.known_hosts != PRESENTED:
+			self.output = ["Host key verification failed.\n"]
+			self.returncode = 255
 		with Path(hosts).open("a") as known:
 			known.write(f"{PRESENTED}\n")
 
 	def wait(self) -> None:
 		pass
+
+	def poll(self):
+		return self.returncode  # finished as soon as its output was read
 
 	def kill(self) -> None:
 		pass
@@ -104,6 +113,7 @@ class UnitTestHostKeyPinning(UnitTestCase):
 		ssh = self.run_ssh(HostKeyPin(PRESENTED, recorded.append))
 
 		self.assertEqual(ssh.option("StrictHostKeyChecking"), "yes")
+		self.assertEqual(ssh.known_hosts, PRESENTED)  # the pin was written for ssh to check against
 		self.assertEqual(recorded, [])  # already known; nothing to record
 
 	def test_without_a_pin_nothing_is_kept(self):

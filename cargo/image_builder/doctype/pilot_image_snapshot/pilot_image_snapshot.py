@@ -89,8 +89,8 @@ class PilotImageSnapshot(Document):
 			builder.change_site_apps(machine.address, private_key, "disable", required, pin=pin)
 		else:
 			# Uninstall the signup app and what it requires from site and ensure nothing else is installed.
-			builder.change_site_apps(machine.address, private_key, "uninstall", required)
-			builder.change_site_apps(machine.address, private_key, "verify", ["frappe"])
+			builder.change_site_apps(machine.address, private_key, "uninstall", required, pin=pin)
+			builder.change_site_apps(machine.address, private_key, "verify", ["frappe"], pin=pin)
 
 	def get_atlas_tags(self, image: "PilotImage") -> dict[str, str]:
 		"""The snapshot's specification, which is what a search at Atlas asks for."""
@@ -112,7 +112,9 @@ class PilotImageSnapshot(Document):
 	def take(self, machine: MachineDoc, image: "PilotImage") -> None:
 		"""Ask Atlas to photograph the machine as it is now. `complete_if_available` finishes
 		the snapshot once Atlas has made the image."""
-		Builder().flush_build_machine(machine.address, machine.get_password("ssh_private_key"))
+		Builder().flush_build_machine(
+			machine.address, machine.get_password("ssh_private_key"), pin=machine.host_key_pin()
+		)
 
 		title = f"{self.pilot_image}-{self.signup_app}" if self.signup_app else self.pilot_image
 		self.snapshot_id = machine.snapshot(title, self.get_atlas_tags(image))
@@ -152,7 +154,7 @@ class PilotImageSnapshot(Document):
 		except Exception:
 			frappe.log_error(
 				title=f"Could not delete Atlas image {self.snapshot_id} of {self.name}",
-				message=frappe.get_traceback(with_context=True),
+				message=frappe.get_traceback(with_context=False),
 			)
 			return False
 

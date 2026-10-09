@@ -10,7 +10,7 @@ from frappe.utils import cint
 from cargo.atlas_client import base_image_id
 from cargo.cargo.doctype.machine.machine import Machine
 from cargo.client_models import VALKEY, NodeSpec
-from cargo.service import configure_service_webhook, mark, single_machine_sync
+from cargo.service import configure_service_webhook, mark, release_machine, single_machine_sync
 from cargo.ssh import OutputLog, run_over_ssh, script
 from cargo.workflow_engine.doctype.press_workflow.decorators import flow, task
 from cargo.workflow_engine.doctype.press_workflow.workflow_builder import WorkflowBuilder
@@ -140,6 +140,14 @@ class ValkeyServer(WorkflowBuilder):
 			"MAX_MEMORY_MB": self.max_memory_mb,
 			"ADMIN_PASSWORD": self.get_password("admin_password"),
 		}
+
+	@frappe.whitelist()
+	def release_machine(self) -> None:
+		"""Let a dead or failed machine go; the next one is asked for on the same record."""
+		frappe.only_for("System Manager")
+		release_machine(self, ("Draft", "Failed"))
+		self.reload()
+		self.mark("Draft")
 
 	def sync_machines(self) -> None:
 		single_machine_sync(self)
