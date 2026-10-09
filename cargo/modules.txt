@@ -5,3 +5,4 @@ Image Builder
 Telemetry
 Cloud Mail
 Postgres
+Valkey
