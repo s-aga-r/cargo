@@ -41,11 +41,11 @@ One machine per call. Cargo asks for them one at a time and tracks each as its o
 | `ssh_keys` | A list of one: root's public key. Cargo keeps the private half |
 | `hostname` | The Machine's own name, e.g. `OSC-0001-storage-0001` |
 | `metadata` | Free-form. Cargo puts the machine's `role` here |
-| `egress` | Always `uplink` — see below |
+| `ipv4_internet_access` | Always `true` — see below |
 
 Send back the machine, including its `id`. Don't wait for it to boot; Cargo polls.
 
-**Most machines get no public address.** `egress: uplink` gives the machine the internet without an
+**Most machines get no public address.** `ipv4_internet_access: true` gives the machine the internet without an
 address of its own. Everything Cargo does to a machine — SSH, Garage's admin API, Garage
 peering — goes over the mesh.
 
@@ -111,9 +111,10 @@ surviving.
 
 ## Finding the base image — `GET /images?image_type=system`
 
-Cargo bakes on the Ubuntu System image. Atlas names an image by a generated id, so Cargo
-reads the enabled System images and takes the one whose `operating_system` and
-`operating_system_version` match, and whose `status` is `available`.
+Cargo bakes on the Ubuntu System image. Atlas names an image by a generated id, so Cargo asks
+for System images carrying the tags `purpose:base,os:Ubuntu,os_version:24.04` (`GET
+/images?image_type=system&tag=...&limit=100`), which Atlas matches and returns newest first,
+and takes the first whose `status` is `available`.
 
 A build stops with a clear error when no such image exists, rather than asking Atlas for a
 machine that cannot boot.
