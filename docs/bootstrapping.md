@@ -102,6 +102,10 @@ A host builds the region's Postgres when the site config holds `default_postgres
 
 A host builds the region's Valkey when the site config holds `default_valkey_config`. It listens on the mesh only, keeps nothing on disk, and reports to Central as service `valkey`. Read [valkey](valkey.md).
 
+## Mail
+
+A host builds the region's mail cluster when the site config holds `default_mail_cluster_config` and the region's object storage, Postgres, Valkey and DNS Zone are in place. Read [mail](mail.md).
+
 ## Authentication
 
 Cargo calls Atlas with `Authorization: Bearer <atlas_token>` and `X-Tenant-ID: 0`. The token has audience `atlas-admin:<region-id>`, subject `cargo`, scope `*`, tenant `0`, and a 365-day lifetime.
