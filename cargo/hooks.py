@@ -289,6 +289,7 @@ scheduler_events = {
 		# exports moves meaningfully faster.
 		"*/5 * * * *": [
 			"cargo.object_storage.health.ship_metrics",
+			"cargo.cloud_mail.health.ship_metrics",
 		],
 	},
 	"hourly": [
@@ -303,6 +304,7 @@ scheduler_events = {
 		"cargo.cloud_mail.doctype.tls_report.tls_report.fetch_all_clusters",
 	],
 	"daily": [
+		"cargo.backup.backup_database",
 		"cargo.cargo.doctype.dns_record.dns_record.verify_all_dns_records",
 		"cargo.cloud_mail.doctype.stalwart_cluster.stalwart_cluster.check_all_clusters",
 		"cargo.cloud_mail.doctype.stalwart_node.stalwart_node.verify_all_ptr_records",
