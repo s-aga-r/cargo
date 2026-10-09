@@ -15,6 +15,7 @@
   "status",
   "stalwart_version",
   "network_section",
+  "machine",
   "ipv4_address",
   "stalwart_section",
   "data_store",
@@ -108,12 +109,20 @@
    "label": "Network"
   },
   {
-   "description": "Public IPv4 of the VPS, used for SSH, the gateway's A record and management. The addresses mail leaves from are listed on the pools; this one can be among them. Changing it rewrites the DNS records and requires a new SSH check.",
+   "description": "The Atlas machine this gateway runs on. Its public address becomes the gateway's.",
+   "fieldname": "machine",
+   "fieldtype": "Link",
+   "label": "Machine",
+   "options": "Machine",
+   "read_only": 1
+  },
+  {
+   "description": "Taken from the machine once Atlas reports it running.",
    "fieldname": "ipv4_address",
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "IPv4 Address",
-   "reqd": 1
+   "read_only": 1
   },
   {
    "fieldname": "stalwart_section",
@@ -222,7 +231,7 @@
    "link_fieldname": "managed_by"
   }
  ],
- "modified": "2026-09-26 12:00:00.000000",
+ "modified": "2026-10-09 12:24:13.226430",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Egress Gateway",

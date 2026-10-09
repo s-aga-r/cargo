@@ -105,6 +105,51 @@ class TestStalwartCluster(IntegrationTestCase):
 		cluster.save()
 		self.assertEqual(cluster.coordinator, "Disabled")
 
+	def test_a_node_rents_its_machine_and_takes_its_public_address(self) -> None:
+		cluster = make_cluster()
+		node = frappe.get_doc({"doctype": "Stalwart Node", "cluster": cluster.name}).insert()
+		self.assertIsNone(node.ipv4_address)
+		self.assertFalse(frappe.db.exists("DNS Record", {"managed_by": node.name}))
+
+		module = "cargo.cloud_mail.doctype.stalwart_node.stalwart_node"
+		with (
+			patch(f"{module}.base_image_id", return_value="img-ubuntu"),
+			patch("cargo.atlas_client.AtlasClient") as atlas,
+		):
+			atlas.from_settings.return_value.create_vm.return_value = {"id": "vm-mail-1"}
+			node.request_machine(2000, 4, 40)
+		asked = atlas.from_settings.return_value.create_vm.call_args.kwargs
+		self.assertTrue(asked["public_ipv4"])
+		rules = asked["firewall"]["inbound"]
+		self.assertIn({"protocol": "any", "cidrs": ["fdaa::/16"]}, rules)
+		self.assertIn({"protocol": "tcp", "ports": "25", "cidrs": ["0.0.0.0/0", "::/0"]}, rules)
+		self.assertFalse(any(rule.get("ports") == "22" for rule in rules))
+
+		node.reload()
+		machine = frappe.get_doc("Machine", node.machine)
+		self.assertEqual(
+			(machine.role, machine.status, machine.reference_name), ("mail", "Pending", node.name)
+		)
+
+		# Running without a public address is a fault, not a delay.
+		machine.db_set({"status": "Running", "address": "fdaa:1::7"})
+		node.sync_machines()
+		self.assertEqual(frappe.db.get_value("Stalwart Node", node.name, "status"), "Failed")
+		self.assertIn("no public address", frappe.db.get_value("Stalwart Node", node.name, "last_error"))
+
+		node.set_status("Pending")
+		machine.db_set("public_ipv4", "203.0.113.7")
+		node.sync_machines()
+		node.reload()
+		self.assertEqual(node.ipv4_address, "203.0.113.7")
+		self.assertEqual(
+			frappe.db.get_value("DNS Record", {"managed_by": node.name, "type": "A"}, "value"), "203.0.113.7"
+		)
+
+		machine.db_set("status", "Terminated")
+		node.sync_machines()
+		self.assertEqual(frappe.db.get_value("Stalwart Node", node.name, "status"), "Failed")
+
 	def test_node_hostnames_are_handed_out_in_order(self) -> None:
 		cluster = make_cluster()
 		first = make_node(cluster, "203.0.113.1")

@@ -4,9 +4,13 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import now
+from frappe.utils import cint, now
 
+from cargo.atlas_client import base_image_id
+from cargo.cargo.doctype.machine.machine import DEAD_MACHINE_STATES, Machine
+from cargo.client_models import MAIL, NodeSpec
 from cargo.cloud_mail.cluster import dns, egress, naming, plan
+from cargo.cloud_mail.cluster.firewall import gateway_firewall
 from cargo.cloud_mail.doctype.stalwart_node.stalwart_node import validate_ip
 from cargo.cloud_mail.stalwart import get_admin_client, get_client
 from cargo.cloud_mail.utils import dkim_algorithms, log_exception, validate_version
@@ -32,9 +36,10 @@ class EgressGateway(Document):
 		enabled: DF.Check
 		hostname: DF.Data
 		installed_version: DF.Data | None
-		ipv4_address: DF.Data
+		ipv4_address: DF.Data | None
 		last_config_sync_at: DF.Datetime | None
 		last_error: DF.SmallText | None
+		machine: DF.Link | None
 		provisioned_at: DF.Datetime | None
 		stalwart_version: DF.Data | None
 		location: DF.Data | None
@@ -65,7 +70,7 @@ class EgressGateway(Document):
 			frappe.throw(_("Hostname must be a single label under {0}.").format(cluster.default_domain))
 
 		self.base_url = f"https://{self.hostname}"
-		self.ipv4_address = validate_ip(self.ipv4_address, 4)
+		self.ipv4_address = validate_ip(self.ipv4_address, 4) if self.ipv4_address else None
 		self.stalwart_version = validate_version(
 			self.stalwart_version or cluster.stalwart_version,
 			_("Stalwart Version"),
@@ -146,6 +151,45 @@ class EgressGateway(Document):
 			{"config_version": (self.config_version or 0) + 1, "config_plan": plan.redacted(rendered_plan)},
 			update_modified=False,
 		)
+
+	# --- the machine ---------------------------------------------------------------------
+
+	@frappe.whitelist()
+	def request_machine(self, cpu_millicores: int, ram_gb: int, disk_gb: int) -> str:
+		"""Rent this gateway's machine from Atlas, with a public address and the relay firewall."""
+		frappe.only_for("System Manager")
+		if self.machine:
+			frappe.throw(_("This gateway already has a machine."))
+
+		cluster = self.get_cluster()
+		machine = Machine.request(
+			self,
+			NodeSpec(
+				role=MAIL, cpu_millicores=cint(cpu_millicores), ram_gb=cint(ram_gb), disk_gb=cint(disk_gb)
+			),
+			base_image=base_image_id(),
+			public_ipv4=True,
+			firewall=gateway_firewall(
+				[pool.relay_port for pool in self.pools()], egress.node_addresses(cluster)
+			),
+		)
+		self.db_set("machine", machine.name, update_modified=False)
+		return machine.name
+
+	def sync_machines(self) -> None:
+		"""What this gateway's machine settling means for it."""
+		machine: Machine = frappe.get_doc("Machine", self.machine)
+		if machine.status in DEAD_MACHINE_STATES:
+			self.set_status("Failed", _("{0} is {1}.").format(machine.name, machine.status))
+			return
+		if machine.status != "Running":
+			return
+		if not machine.public_ipv4:
+			self.set_status("Failed", _("Atlas gave {0} no public address.").format(machine.name))
+			return
+		if self.ipv4_address != machine.public_ipv4:
+			self.ipv4_address = machine.public_ipv4
+			self.save(ignore_permissions=True)
 
 	# --- actions --------------------------------------------------------------------
 

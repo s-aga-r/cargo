@@ -15,6 +15,7 @@
   "status",
   "is_bootstrap_node",
   "network_section",
+  "machine",
   "ipv4_address",
   "ipv6_address",
   "column_break_network",
@@ -26,6 +27,8 @@
   "column_break_state",
   "provisioned_at",
   "last_health_at",
+  "consecutive_failures",
+  "drained_by",
   "last_error"
  ],
  "fields": [
@@ -107,12 +110,20 @@
    "label": "Network"
   },
   {
-   "description": "Public IPv4 of the VPS. Used for SSH, the node's A record and, while the node is active, the cluster hostname's A record.",
+   "description": "The Atlas machine this node runs on. Its public address becomes the node's.",
+   "fieldname": "machine",
+   "fieldtype": "Link",
+   "label": "Machine",
+   "options": "Machine",
+   "read_only": 1
+  },
+  {
+   "description": "Taken from the machine once Atlas reports it running.",
    "fieldname": "ipv4_address",
    "fieldtype": "Data",
    "in_list_view": 1,
    "label": "IPv4 Address",
-   "reqd": 1
+   "read_only": 1
   },
   {
    "description": "Public IPv6 of the VPS, if it has one. Gets an AAAA record alongside the A record.",
@@ -178,6 +189,20 @@
    "read_only": 1
   },
   {
+   "description": "Health checks in a row this node failed.",
+   "fieldname": "consecutive_failures",
+   "fieldtype": "Int",
+   "label": "Consecutive Failures",
+   "read_only": 1
+  },
+  {
+   "description": "Who took the node out of ingress: Health, or an operator.",
+   "fieldname": "drained_by",
+   "fieldtype": "Data",
+   "label": "Drained By",
+   "read_only": 1
+  },
+  {
    "description": "Why the last job, health check or SSH check failed. Cleared by the next success.",
    "fieldname": "last_error",
    "fieldtype": "Small Text",
@@ -193,7 +218,7 @@
    "link_fieldname": "managed_by"
   }
  ],
- "modified": "2026-09-26 12:00:00.000000",
+ "modified": "2026-10-09 12:24:13.225678",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Stalwart Node",

@@ -8,7 +8,11 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint
 
+from cargo.atlas_client import base_image_id
+from cargo.cargo.doctype.machine.machine import DEAD_MACHINE_STATES, Machine
+from cargo.client_models import MAIL, NodeSpec
 from cargo.cloud_mail.cluster import bootstrap, dns, naming
+from cargo.cloud_mail.cluster.firewall import node_firewall
 from cargo.cloud_mail.utils import log_exception
 from cargo.dns.resolver import verify_ptr_record
 
@@ -25,15 +29,18 @@ class StalwartNode(Document):
 		from frappe.types import DF
 
 		cluster: DF.Link
+		consecutive_failures: DF.Int
+		drained_by: DF.Data | None
 		enabled: DF.Check
 		hostname: DF.Data
 		in_ingress_dns: DF.Check
 		installed_version: DF.Data | None
-		ipv4_address: DF.Data
+		ipv4_address: DF.Data | None
 		ipv6_address: DF.Data | None
 		is_bootstrap_node: DF.Check
 		last_error: DF.SmallText | None
 		last_health_at: DF.Datetime | None
+		machine: DF.Link | None
 		node_id: DF.Int
 		provisioned_at: DF.Datetime | None
 		ptr_verified: DF.Check
@@ -60,7 +67,7 @@ class StalwartNode(Document):
 			frappe.throw(_("Hostname must be a single label under {0}.").format(cluster.default_domain))
 
 		self.validate_single_node(cluster)
-		self.ipv4_address = validate_ip(self.ipv4_address, 4)
+		self.ipv4_address = validate_ip(self.ipv4_address, 4) if self.ipv4_address else None
 		self.ipv6_address = validate_ip(self.ipv6_address, 6) if self.ipv6_address else None
 		if self.is_new():
 			self.status = "Pending"
@@ -121,6 +128,44 @@ class StalwartNode(Document):
 		if error is not None:
 			values["last_error"] = error[:1000]
 		self.db_set(values, update_modified=False, notify=True)
+
+	# --- the machine ------------------------------------------------------------
+
+	@frappe.whitelist()
+	def request_machine(self, cpu_millicores: int, ram_gb: int, disk_gb: int) -> str:
+		"""Rent this node's machine from Atlas, with a public address and the mail firewall."""
+		frappe.only_for("System Manager")
+		if self.machine:
+			frappe.throw(_("This node already has a machine."))
+
+		machine = Machine.request(
+			self,
+			NodeSpec(
+				role=MAIL, cpu_millicores=cint(cpu_millicores), ram_gb=cint(ram_gb), disk_gb=cint(disk_gb)
+			),
+			base_image=base_image_id(),
+			public_ipv4=True,
+			firewall=node_firewall(),
+		)
+		self.db_set("machine", machine.name, update_modified=False)
+		return machine.name
+
+	def sync_machines(self) -> None:
+		"""What this node's machine settling means for it. Its state is already recorded;
+		`sync_pending_machines` calls this once it changes."""
+		machine: Machine = frappe.get_doc("Machine", self.machine)
+		if machine.status in DEAD_MACHINE_STATES:
+			self.set_status("Failed", _("{0} is {1}.").format(machine.name, machine.status))
+			return
+		if machine.status != "Running":
+			return
+		if not machine.public_ipv4:
+			# Atlas says it is up; an address that never came is a fault, not a delay.
+			self.set_status("Failed", _("Atlas gave {0} no public address.").format(machine.name))
+			return
+		if self.ipv4_address != machine.public_ipv4:
+			self.ipv4_address = machine.public_ipv4
+			self.save(ignore_permissions=True)
 
 	# --- actions --------------------------------------------------------------
 

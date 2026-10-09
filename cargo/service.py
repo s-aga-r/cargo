@@ -28,7 +28,8 @@ SOURCE = "cargo"
 # The two states Central is told about; everything between them is Cargo's business.
 REPORTED_STATUSES = ("Active", "Failed")
 # Atlas's mesh prefix: what the Proxy forwards from, and all a service's nginx may trust.
-TRUSTED_PROXIES = ("127.0.0.1", "::1", "fdaa::/16")
+MESH_NETWORK = "fdaa::/16"
+TRUSTED_PROXIES = ("127.0.0.1", "::1", MESH_NETWORK)
 
 
 def wildcard_domain() -> str:

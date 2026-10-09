@@ -66,6 +66,9 @@ def remove_cluster(name: str) -> None:
 		return
 
 	nodes = frappe.get_all("Stalwart Node", {"cluster": name}, pluck="name")
+	if nodes:
+		# A node's machine links back to it; nothing else holds the row, so it goes first.
+		frappe.db.delete("Machine", {"reference_doctype": "Stalwart Node", "reference_name": ["in", nodes]})
 	frappe.db.delete("DNS Record", {"managed_by": ["in", [*nodes, name]]})
 	for node in nodes:
 		frappe.delete_doc("Stalwart Node", node, force=True, ignore_permissions=True, ignore_on_trash=True)
