@@ -390,6 +390,14 @@ class TestStalwartCluster(IntegrationTestCase):
 			frappe.db.get_value("DNS Record", {"dns_zone": ROOT_DOMAIN, "host": "spf.blr"}, "value"),
 		)
 
+	def test_a_manual_certificate_leaves_acme_out_of_the_plan(self) -> None:
+		cluster = make_cluster(certificate_management="Manual")
+		operations = {op["object"]: op for op in plan.cluster_plan(cluster)}
+		self.assertNotIn("AcmeProvider", operations)
+		self.assertEqual(
+			operations["Domain"]["value"]["default"]["certificateManagement"], {"@type": "Manual"}
+		)
+
 	def test_bootstrap_and_cluster_plans(self) -> None:
 		cluster = make_cluster()
 

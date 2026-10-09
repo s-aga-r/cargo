@@ -44,6 +44,7 @@ class StalwartCluster(Document):
 		base_url: DF.Data | None
 		blob_store: DF.Link | None
 		bootstrap_node: DF.Link | None
+		certificate_management: DF.Literal["ACME", "Manual"]
 		config_plan: DF.Code | None
 		config_version: DF.Int
 		coordinator: DF.Literal["Disabled", "Default"]

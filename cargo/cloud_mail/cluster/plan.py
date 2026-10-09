@@ -192,20 +192,22 @@ def cluster_plan(cluster: Document) -> list[dict]:
 			}
 		)
 
-	plan.append(
-		{
-			"@type": "upsert",
-			"object": "AcmeProvider",
-			"matchOn": ["directory"],
-			"value": {"acme": acme_provider(cluster)},
-		}
-	)
+	with_acme = uses_acme(cluster)
+	if with_acme:
+		plan.append(
+			{
+				"@type": "upsert",
+				"object": "AcmeProvider",
+				"matchOn": ["directory"],
+				"value": {"acme": acme_provider(cluster)},
+			}
+		)
 	plan.append(
 		{
 			"@type": "upsert",
 			"object": "Domain",
 			"matchOn": ["name"],
-			"value": {"default": default_domain(cluster, with_dns=bool(dns_server))},
+			"value": {"default": default_domain(cluster, with_dns=bool(dns_server), with_acme=with_acme)},
 		}
 	)
 	plan.append(
@@ -239,6 +241,11 @@ def cluster_plan(cluster: Document) -> list[dict]:
 	return plan
 
 
+def uses_acme(cluster: Document) -> bool:
+	"""Manual leaves Stalwart on its self-signed default certificate."""
+	return (cluster.get("certificate_management") or "ACME") != "Manual"
+
+
 def acme_provider(cluster: Document) -> dict:
 	contact = cluster.acme_contact_email
 	provider = {
@@ -250,24 +257,27 @@ def acme_provider(cluster: Document) -> dict:
 	return provider
 
 
-def default_domain(cluster: Document, with_dns: bool) -> dict:
+def default_domain(cluster: Document, with_dns: bool, with_acme: bool = True) -> dict:
 	"""The cluster zone: carries the wildcard certificate and signs the cluster's own mail.
 
 	Reports, alarms and notifications leave from this domain, so it gets DKIM keys like any
 	customer domain, chosen by the same setting.
 	"""
 
-	domain = {
-		"name": cluster.default_domain,
-		"description": "Cluster default domain",
-		"isEnabled": True,
-		"certificateManagement": {
+	certificate = {"@type": "Manual"}
+	if with_acme:
+		certificate = {
 			"@type": "Automatic",
 			"acmeProviderId": "#acme",
 			# The wildcard covers the ingress hostname and every node; Let's Encrypt rejects an
 			# order that lists a name its wildcard already covers.
 			"subjectAlternativeNames": as_set([f"*.{cluster.default_domain}"]),
-		},
+		}
+	domain = {
+		"name": cluster.default_domain,
+		"description": "Cluster default domain",
+		"isEnabled": True,
+		"certificateManagement": certificate,
 		"dkimManagement": dkim_management_payload(dkim_algorithms()),
 		"subAddressing": {"@type": "Disabled"},
 	}

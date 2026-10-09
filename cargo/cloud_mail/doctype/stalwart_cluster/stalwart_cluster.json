@@ -35,6 +35,7 @@
   "column_break_derived",
   "single_node",
   "tls_tab",
+  "certificate_management",
   "acme_directory_url",
   "column_break_tls",
   "acme_contact_email",
@@ -259,6 +260,14 @@
    "label": "TLS"
   },
   {
+   "default": "ACME",
+   "description": "Manual leaves the cluster on Stalwart's self-signed default certificate: for a region with no public DNS yet, and for fake_atlas.",
+   "fieldname": "certificate_management",
+   "fieldtype": "Select",
+   "label": "Certificate Management",
+   "options": "ACME\nManual"
+  },
+  {
    "description": "Certificate authority the cluster requests its certificates from. Defaults to Mail Settings. Use the Let's Encrypt staging directory while testing.",
    "fieldname": "acme_directory_url",
    "fieldtype": "Data",
@@ -439,7 +448,7 @@
    "link_fieldname": "cluster"
   }
  ],
- "modified": "2026-10-09 12:42:38.868334",
+ "modified": "2026-10-09 12:48:09.582861",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Stalwart Cluster",
