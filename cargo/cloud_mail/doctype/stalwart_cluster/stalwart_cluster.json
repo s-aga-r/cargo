@@ -11,6 +11,8 @@
   "enabled",
   "column_break_details",
   "status",
+  "health",
+  "health_reason",
   "stalwart_version",
   "naming_section",
   "label",
@@ -94,6 +96,23 @@
    "in_standard_filter": 1,
    "label": "Status",
    "options": "Pending\nBootstrapping\nActive\nFailed\nDisabled",
+   "read_only": 1
+  },
+  {
+   "default": "Unknown",
+   "fieldname": "health",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Health",
+   "options": "Unknown\nHealthy\nDegraded\nCritical",
+   "read_only": 1
+  },
+  {
+   "depends_on": "health_reason",
+   "fieldname": "health_reason",
+   "fieldtype": "Small Text",
+   "label": "Health Reason",
    "read_only": 1
   },
   {
@@ -420,7 +439,7 @@
    "link_fieldname": "cluster"
   }
  ],
- "modified": "2026-09-21 12:00:00.000000",
+ "modified": "2026-10-09 12:42:38.868334",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Stalwart Cluster",

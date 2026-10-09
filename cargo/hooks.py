@@ -283,6 +283,7 @@ scheduler_events = {
 			# Machines die without telling anyone, so health is re-read on a clock. A minute
 			# is what sets alerting latency; the read is two calls to the gateway.
 			"cargo.object_storage.health.refresh_health",
+			"cargo.cloud_mail.health.refresh_health",
 		],
 		# One SSH session per node, so five minutes rather than one. Nothing Garage
 		# exports moves meaningfully faster.
@@ -292,6 +293,7 @@ scheduler_events = {
 	},
 	"hourly": [
 		"cargo.object_storage.health.prune_history",
+		"cargo.cloud_mail.health.prune_history",
 		# A customer domain goes live once its records resolve, and a DKIM key the cluster was
 		# still generating is picked up on the next pass. A failed lookup never turns one off.
 		"cargo.cloud_mail.doctype.mail_domain.mail_domain.refresh_rotating_domains",
