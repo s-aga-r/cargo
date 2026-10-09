@@ -1,0 +1,408 @@
+# Copyright (c) 2026, Frappe Technologies Pvt. Ltd. and contributors
+# For license information, please see license.txt
+
+import frappe
+from frappe import _
+from frappe.model.document import Document
+from frappe.utils import add_to_date, cint, get_datetime, now, now_datetime
+
+from cargo.cargo.doctype.dns_zone.dns_zone import settings_zone
+from cargo.mail.cluster import bootstrap, dns, egress, plan, reconcile
+from cargo.mail.stalwart import forget_sessions, get_admin_client, get_client
+from cargo.mail.stalwart.credentials import Credential
+from cargo.mail.tenancy import events
+from cargo.mail.utils import dkim_algorithms, log_exception, validate_version
+from cargo.service import configure_service_webhook
+from cargo.workflow_engine.doctype.press_workflow.decorators import flow, task
+from cargo.workflow_engine.doctype.press_workflow.workflow_builder import WorkflowBuilder
+
+
+class StalwartCluster(WorkflowBuilder):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		acme_contact_email: DF.Data | None
+		acme_directory_url: DF.Data | None
+		admin_password: DF.Password | None
+		admin_username: DF.Data | None
+		api_key: DF.Password | None
+		auto_setup_attempts: DF.Int
+		auto_spawn: DF.Check
+		base_url: DF.Data | None
+		blob_bucket: DF.Link | None
+		bootstrap_node: DF.Link | None
+		certificate_management: DF.Literal["ACME", "Manual"]
+		config_plan: DF.Code | None
+		config_version: DF.Int
+		coordinator: DF.Literal["Disabled", "Default"]
+		data_store: DF.Link | None
+		default_domain: DF.Data | None
+		default_egress_pool: DF.Link | None
+		dns_zone: DF.Link
+		drift_report: DF.JSON | None
+		enabled: DF.Check
+		error: DF.LongText | None
+		health: DF.Literal["Unknown", "Healthy", "Degraded", "Critical"]
+		health_reason: DF.SmallText | None
+		hostname: DF.Data
+		in_memory_store: DF.Link | None
+		last_config_sync_at: DF.Datetime | None
+		relay_password: DF.Password | None
+		relay_username: DF.Data | None
+		single_node: DF.Check
+		stalwart_version: DF.Data | None
+		title: DF.Data
+		status: DF.Literal["Pending", "Bootstrapping", "Active", "Failed", "Disabled"]
+	# end: auto-generated types
+
+	# --- lifecycle ------------------------------------------------------------
+
+	def before_insert(self) -> None:
+		self.status = "Pending"
+		self.admin_username = self.admin_username or "admin"
+		if not self.admin_password:
+			self.admin_password = frappe.generate_hash(length=32)
+		self.relay_username = self.relay_username or "relay"
+		if not self.relay_password:
+			self.relay_password = frappe.generate_hash(length=32)
+
+	def validate(self) -> None:
+		self.validate_names()
+		self.apply_defaults()
+		self.validate_stores()
+		self.validate_egress_pool()
+
+	def validate_egress_pool(self) -> None:
+		if (
+			self.default_egress_pool
+			and frappe.db.get_value("Egress IP Pool", self.default_egress_pool, "cluster") != self.name
+		):
+			frappe.throw(_("Egress pool {0} belongs to another cluster.").format(self.default_egress_pool))
+
+	def after_insert(self) -> None:
+		dns.sync_spf_record(self)
+		configure_mail_webhook(self)
+
+	def on_update(self) -> None:
+		before = self.get_doc_before_save()
+		if not before:
+			return
+		if before.enabled and not self.enabled and self.status == "Active":
+			self.db_set("status", "Disabled")
+		elif not before.enabled and self.enabled and self.status == "Disabled":
+			self.db_set("status", "Active")
+		if before.default_egress_pool != self.default_egress_pool:
+			egress.resync_cluster(self)
+
+	def on_trash(self) -> None:
+		for doctype in ("Stalwart Node", "Mail Site", "Egress Gateway", "Egress IP Pool"):
+			if frappe.db.exists("DocType", doctype) and frappe.db.exists(doctype, {"cluster": self.name}):
+				frappe.throw(_("Remove every {0} of this cluster first.").format(_(doctype)))
+		dns.delete_cluster_records(self)
+		super().on_trash()
+
+	# --- validation -----------------------------------------------------------
+
+	def autoname(self) -> None:
+		# Naming runs before validate: the zone settles here so the hostname can be derived.
+		self.resolve_names()
+		self.name = self.hostname
+
+	def resolve_names(self) -> None:
+		"""The cluster is its zone's: the zone apex is the default domain, ``mx`` under it the
+		hostname. One cluster per zone, so a region has one cluster."""
+
+		self.dns_zone = self.dns_zone or settings_zone()
+		if not self.dns_zone:
+			frappe.throw(_("Create a DNS Zone before creating clusters."))
+		other = frappe.db.exists("Stalwart Cluster", {"dns_zone": self.dns_zone, "name": ["!=", self.name]})
+		if other:
+			frappe.throw(_("Zone {0} already has the cluster {1}.").format(self.dns_zone, other))
+		self.default_domain = self.dns_zone
+		self.hostname = f"mx.{self.dns_zone}"
+		self.base_url = f"https://{self.hostname}"
+
+	def validate_names(self) -> None:
+		self.resolve_names()
+		self.title = (self.title or "").strip() or self.hostname
+
+	def apply_defaults(self) -> None:
+		self.stalwart_version = validate_version(
+			self.stalwart_version or plan.STALWART_VERSION, _("Stalwart Version")
+		)
+		self.acme_directory_url = self.acme_directory_url or plan.ACME_DIRECTORY_URL
+
+	def validate_stores(self) -> None:
+		"""Without a Postgres Database the data lives in RocksDB on one node, so such a
+		cluster can never grow; growing also needs Valkey for the nodes to coordinate."""
+		self.single_node = int(not self.data_store)
+		if self.single_node and self.node_count() > 1:
+			frappe.throw(
+				_("A RocksDB store cannot be shared by the cluster's {0} nodes.").format(self.node_count())
+			)
+		self.coordinator = "Default" if self.in_memory_store and not self.single_node else "Disabled"
+		if self.node_count() > 1 and self.coordinator == "Disabled":
+			frappe.throw(_("A multi-node cluster needs a Valkey Credential to coordinate nodes."))
+		if self.blob_bucket:
+			rows = frappe.get_all("Bucket Credential", {"parent": self.blob_bucket, "parenttype": "Bucket"})
+			if len(rows) != 1:
+				frappe.throw(_("Blob Bucket {0} must hold exactly one credential.").format(self.blob_bucket))
+
+	# --- helpers --------------------------------------------------------------
+
+	def node_count(self, enabled_only: bool = True) -> int:
+		if self.is_new():
+			return 0
+		filters = {"cluster": self.name}
+		if enabled_only:
+			filters["enabled"] = 1
+		return frappe.db.count("Stalwart Node", filters)
+
+	def get_nodes(self, statuses: tuple[str, ...] | None = None) -> list[Document]:
+		filters = {"cluster": self.name}
+		if statuses:
+			filters["status"] = ["in", list(statuses)]
+		return [
+			frappe.get_doc("Stalwart Node", n) for n in frappe.get_all("Stalwart Node", filters, pluck="name")
+		]
+
+	def get_client(self):
+		return get_client(self)
+
+	def get_admin_client(self):
+		return get_admin_client(self)
+
+	def bump_config_version(self, rendered_plan: list[dict]) -> None:
+		self.db_set(
+			{
+				"config_version": (self.config_version or 0) + 1,
+				"config_plan": plan.redacted(rendered_plan),
+			},
+			update_modified=False,
+		)
+
+	# --- actions --------------------------------------------------------------
+
+	@frappe.whitelist()
+	def preview_plan(self) -> str:
+		frappe.only_for("System Manager")
+		return plan.redacted(plan.cluster_plan(self))
+
+	@frappe.whitelist()
+	def sync_config(self) -> dict:
+		"""Pushes the generated configuration to the running cluster and reloads it."""
+
+		frappe.only_for("System Manager")
+		if self.status != "Active":
+			frappe.throw(_("Only an active cluster can be synced; provision the first node instead."))
+		return self.push_config()
+
+	def push_config(self) -> dict:
+		"""The sync itself; also run on behalf of documents whose change alters the plan."""
+
+		rendered = plan.cluster_plan(self)
+		result = self.get_client().apply(rendered)
+		self.get_client().reload_settings()
+		self.bump_config_version(rendered)
+		self.db_set({"last_config_sync_at": now(), "drift_report": None}, update_modified=False)
+		return {"created": result.created, "updated": result.updated, "unchanged": result.unchanged}
+
+	@frappe.whitelist()
+	def check_drift(self) -> dict:
+		frappe.only_for("System Manager")
+		report = plan.drift_report(self)
+		self.db_set("drift_report", frappe.as_json(report), update_modified=False)
+		return report
+
+	@frappe.whitelist()
+	def reconcile_directory(self) -> dict:
+		"""Reports domains/accounts/lists that differ between Suite Cloud and the cluster; never mutates."""
+
+		frappe.only_for("System Manager")
+		return reconcile.directory_report(self)
+
+	@frappe.whitelist()
+	def finish_bootstrap(self) -> bool:
+		frappe.only_for("System Manager")
+		return bootstrap.finish_bootstrap(self)
+
+	@frappe.whitelist()
+	def rotate_api_key(self) -> None:
+		"""Mints a fresh management key with the admin credentials and forgets the old one."""
+
+		frappe.only_for("System Manager")
+		client = self.get_admin_client()
+		old = client.api_keys.find_local(description=plan.API_KEY_DESCRIPTION)
+		_, secret = client.api_keys.create_secret(
+			Credential(description=plan.API_KEY_DESCRIPTION, permissions=plan.api_key_permissions())
+		)
+		self.api_key = secret
+		self.save(ignore_permissions=True)
+		forget_sessions(self)
+		if old:
+			client.api_keys.delete(old["id"])
+
+	@frappe.whitelist()
+	def replace_dkim_keys(self) -> None:
+		"""Emergency replacement of the default domain's keys after a leak, same selectors.
+
+		Reports and notifications leave from that domain. With a DNS provider on the zone
+		Stalwart publishes the new records itself; without one they must be published by hand.
+		"""
+
+		frappe.only_for("System Manager")
+		client = self.get_client()
+		domain = client.domains.find_by_name(self.default_domain)
+		if not domain:
+			frappe.throw(
+				_("The cluster does not hold its default domain {0} yet.").format(self.default_domain)
+			)
+		client.domains.replace_dkim_keys(domain["id"], dkim_algorithms())
+
+	# --- rolling upgrade --------------------------------------------------------------------
+
+	@frappe.whitelist()
+	def upgrade_nodes(self) -> None:
+		"""Upgrade every Active node to the cluster's version, one at a time: drain, install,
+		restart, wait for the lease, soak with the cluster Healthy, then the next."""
+		frappe.only_for("System Manager")
+		if self.status != "Active":
+			frappe.throw(_("Only an Active cluster is upgraded."))
+		if running_flows(self):
+			frappe.throw(_("Another upgrade or provisioning flow is running on this cluster."))
+		if not upgrade_order(self):
+			frappe.throw(_("No Active node to upgrade."))
+		self._upgrade_nodes.run_as_workflow()
+
+	@flow
+	def _upgrade_nodes(self) -> None:
+		for name in self.plan_upgrade():
+			if not self.upgrade_node(name):
+				return
+			self.wait_until_serving(name)
+			self.soak(name)
+
+	@task
+	def plan_upgrade(self) -> list[str]:
+		"""The order, fixed once: the engine replays the flow after every task, and a node mid-upgrade
+		is not Active, so working it out afresh each time would skip it."""
+		return upgrade_order(self)
+
+	@task(queue="long", timeout=3 * (bootstrap.INSTALL_TIMEOUT + bootstrap.BOOTSTRAP_TIMEOUT))
+	def upgrade_node(self, name: str) -> bool:
+		"""Drain one node, put the cluster's version on it and restart it. A failure leaves
+		the node out of ingress with its log, and the flow stops here."""
+		node = frappe.get_doc("Stalwart Node", name)
+		bootstrap.drain_node(node, drained_by="Upgrade")
+		installed = bootstrap.run_script(
+			node, "install.sh", bootstrap.install_environment(node), [], bootstrap.INSTALL_TIMEOUT
+		)
+		if installed is None:
+			return False
+		environment = {"WAIT_PORTS": bootstrap.wait_ports(node)}
+		output = bootstrap.run_script(node, "upgrade.sh", environment, [], bootstrap.BOOTSTRAP_TIMEOUT)
+		if output is None:
+			return False
+		bootstrap.after_upgrade(node, bootstrap.installed_version_from(output) or self.stalwart_version)
+		return True
+
+	@task
+	def wait_until_serving(self, name: str) -> None:
+		"""Back into ingress once the node holds an active lease; tried again until it does."""
+		node = frappe.get_doc("Stalwart Node", name)
+		if node.status == "Failed":
+			frappe.throw(_("{0} did not come back: {1}").format(name, node.last_error))
+		if node.status != "Active":
+			bootstrap.check_node(node)
+			node.reload()
+		if node.status != "Active":
+			self.defer_current_task(f"{name} has no active lease yet")
+
+	@task
+	def soak(self, name: str) -> None:
+		"""Watch the upgraded node serve for soak_minutes with the cluster Healthy before the
+		next one is touched. Critical stops the upgrade where it is."""
+		self.reload()
+		if self.health == "Critical":
+			frappe.throw(
+				_("The cluster is critical after upgrading {0}: {1}").format(name, self.health_reason)
+			)
+		since = frappe.db.get_value("Stalwart Node", name, "provisioned_at")
+		minutes = cint(frappe.get_cached_doc("Mail Settings").soak_minutes) or 10
+		if self.health != "Healthy" or now_datetime() < add_to_date(get_datetime(since), minutes=minutes):
+			self.defer_current_task(f"soaking {name}")
+
+	@frappe.whitelist()
+	def show_admin_password(self) -> str:
+		frappe.only_for("Administrator")
+		return self.get_password("admin_password")
+
+
+def upgrade_order(cluster: Document) -> list[str]:
+	"""Active nodes by name, the bootstrap node last: it carries the lease the others watch."""
+	names = frappe.get_all(
+		"Stalwart Node",
+		{"cluster": cluster.name, "status": "Active", "enabled": 1},
+		pluck="name",
+		order_by="name",
+	)
+	return [n for n in names if n != cluster.bootstrap_node] + [
+		n for n in names if n == cluster.bootstrap_node
+	]
+
+
+def running_flows(cluster: Document) -> list[str]:
+	"""Workflows still running on this cluster or any of its nodes."""
+	nodes = frappe.get_all("Stalwart Node", {"cluster": cluster.name}, pluck="name")
+	return frappe.get_all(
+		"Press Workflow",
+		filters=[
+			["status", "in", ["Queued", "Running"]],
+			["linked_docname", "in", [cluster.name, *nodes]],
+			["linked_doctype", "in", ["Stalwart Cluster", "Stalwart Node"]],
+		],
+		pluck="name",
+	)
+
+
+def check_all_clusters() -> None:
+	"""Daily: drift reports for active clusters."""
+
+	for name in frappe.get_all("Stalwart Cluster", {"status": "Active", "enabled": 1}, pluck="name"):
+		cluster = frappe.get_doc("Stalwart Cluster", name)
+		try:
+			cluster.check_drift()
+		except Exception:
+			log_exception(f"Drift check failed for {name}", cluster)
+
+
+def webhook_name_for(cluster: str) -> str:
+	return f"stalwart_cluster-{cluster}"
+
+
+def configure_mail_webhook(cluster: Document) -> None:
+	"""Point a Frappe Webhook at Central so this cluster reports its own status changes. A
+	Cargo that Central has not enrolled yet has nowhere to report, and gets the webhook when
+	the cluster next changes status."""
+	if not frappe.db.get_single_value("Cargo Settings", "central_webhook_url"):
+		return
+	configure_service_webhook(cluster, "mail", webhook_name_for(cluster.name), cluster.base_url)
+	events.configure_domain_webhooks()
+
+
+def region_cluster() -> str:
+	"""The cluster this region serves from: the one in the zone Cargo Settings names, or the
+	only enabled one while that zone is not set."""
+
+	zone = settings_zone()
+	name = (zone and frappe.db.get_value("Stalwart Cluster", {"dns_zone": zone, "enabled": 1})) or (
+		frappe.db.get_value("Stalwart Cluster", {"enabled": 1})
+	)
+	if not name:
+		frappe.throw(_("No Stalwart cluster serves this region yet."))
+	return name

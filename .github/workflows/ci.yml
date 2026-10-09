@@ -138,9 +138,9 @@ jobs:
         with:
           filters: |
             stalwart:
-              - 'cargo/cloud_mail/conf/**'
-              - 'cargo/cloud_mail/cluster/**'
-              - 'cargo/cloud_mail/compat.py'
+              - 'cargo/mail/conf/**'
+              - 'cargo/mail/cluster/**'
+              - 'cargo/mail/compat.py'
               - 'cargo/ssh.py'
               - 'tools/stalwart-compat/**'
               - 'tools/e2e/Dockerfile'

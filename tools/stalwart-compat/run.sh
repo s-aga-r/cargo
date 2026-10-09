@@ -28,7 +28,7 @@ cleanup() {
 trap cleanup EXIT
 
 execute() {
-	(cd "$BENCH_PATH" && bench --site "$SITE" execute "cargo.cloud_mail.compat.$1" ${2:+--kwargs "$2"})
+	(cd "$BENCH_PATH" && bench --site "$SITE" execute "cargo.mail.compat.$1" ${2:+--kwargs "$2"})
 }
 
 value() {

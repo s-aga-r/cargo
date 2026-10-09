@@ -16,7 +16,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BENCH_PATH="${BENCH_PATH:-$(cd "$REPO_ROOT/../.." && pwd)}"
 
 execute() {
-	(cd "$BENCH_PATH" && bench --site "$SITE" execute "cargo.cloud_mail.e2e.$1" ${2:+--kwargs "$2"})
+	(cd "$BENCH_PATH" && bench --site "$SITE" execute "cargo.mail.e2e.$1" ${2:+--kwargs "$2"})
 }
 
 value() {

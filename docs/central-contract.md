@@ -8,7 +8,7 @@ Three conversations.
 
 **Site → Cargo** is the mail directory: a site adds domains, mailboxes, groups and lists on its own slice, with a token Central minted for it.
 
-Cargo's side is `cargo/object_storage/api/bucket.py`, `cargo/cloud_mail/api/central.py`, `cargo/cloud_mail/api/mail/` and the webhooks built in each service's doctype. Central's side is `central/api/state_delivery.py` with `central/integrations/state_delivery.py` behind it, `central/integrations/cargo.py`, and `central/integrations/object_storage.py`.
+Cargo's side is `cargo/object_storage/api/bucket.py`, `cargo/mail/api/central.py`, `cargo/mail/api/mail/` and the webhooks built in each service's doctype. Central's side is `central/api/state_delivery.py` with `central/integrations/state_delivery.py` behind it, `central/integrations/cargo.py`, and `central/integrations/object_storage.py`.
 
 ## Central enrolling Cargo
 
@@ -78,8 +78,8 @@ Central mints these with `_mint_regional_token` in `central/sso.py`. `mint_cargo
 | Scope | Carried by | Opens |
 |---|---|---|
 | `bucket:*` | Central's `mint_cargo_token`; Atlas's own token for its bucket call | `cargo.object_storage.api.bucket.*`, `cargo.api.webhooks.configure` |
-| `mail:*` | Central's mail lifecycle token | `cargo.cloud_mail.api.central.*` |
-| `mail` with `site` | A site's token, minted by Central for one site | `cargo.cloud_mail.api.site.*`, `cargo.cloud_mail.api.mail.*` |
+| `mail:*` | Central's mail lifecycle token | `cargo.mail.api.central.*` |
+| `mail` with `site` | A site's token, minted by Central for one site | `cargo.mail.api.site.*`, `cargo.mail.api.mail.*` |
 
 ### Buckets
 
@@ -97,7 +97,7 @@ A Cargo host serves one region. A call naming another is refused, and so is one 
 
 ### Mail sites
 
-Central registers every site it places in the region, Suite site or not, and tells Cargo what the site may do. All under `cargo.cloud_mail.api.central`.
+Central registers every site it places in the region, Suite site or not, and tells Cargo what the site may do. All under `cargo.mail.api.central`.
 
 | Call | Does |
 |---|---|
@@ -134,7 +134,7 @@ A site reaches Cargo with a token Central minted for that site:
 
 Cargo resolves the site from the `site` claim and nothing else. A suspended site is told so (`SiteSuspendedError`, 403); an archived or unknown one is refused (`SiteAuthError`, 401). Each site may make 300 requests per minute. Anything that belongs to another site is reported as not found, never as forbidden. If the cluster refuses a change, the site gets 422 with Stalwart's error type (`StalwartRejected`); if Cargo's own cluster credentials are wrong, 502 (`ClusterMisconfiguredError`).
 
-The methods are those Suite Cloud served, under `cargo.cloud_mail.api`: `site.ping`, `site.update_site_profile`, and the `mail.domains`, `mail.accounts`, `mail.groups`, `mail.mailing_lists`, `mail.meta`, `mail.dmarc` and `mail.tls` modules. `cargo/cloud_mail/tests/test_api_contract.py` pins the list and the exception names a client switches on.
+The methods are those Suite Cloud served, under `cargo.mail.api`: `site.ping`, `site.update_site_profile`, and the `mail.domains`, `mail.accounts`, `mail.groups`, `mail.mailing_lists`, `mail.meta`, `mail.dmarc` and `mail.tls` modules. `cargo/mail/tests/test_api_contract.py` pins the list and the exception names a client switches on.
 
 How a site obtains its token, and how Central hands a plain site its send-only credential, are set out in `suite-cloud-migration.md`: Pilot fetches the token through its per-site Central proxy, and Central pushes the credential to Pilot as a site action.
 

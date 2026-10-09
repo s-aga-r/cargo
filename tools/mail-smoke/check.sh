@@ -19,7 +19,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BENCH_PATH="${BENCH_PATH:-$(cd "$REPO_ROOT/../.." && pwd)}"
 
 execute() {
-	(cd "$BENCH_PATH" && bench --site "$SITE" execute "cargo.cloud_mail.smoke.$1" --kwargs "$2")
+	(cd "$BENCH_PATH" && bench --site "$SITE" execute "cargo.mail.smoke.$1" --kwargs "$2")
 }
 value() { grep -m1 "^$2=" <<<"$1" | cut -d= -f2-; }
 

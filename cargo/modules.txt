@@ -3,7 +3,7 @@ Object Storage
 Workflow Engine
 Image Builder
 Telemetry
-Cloud Mail
+Mail
 Postgres
 Valkey
 SFU

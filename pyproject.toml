@@ -70,7 +70,7 @@ typing-modules = ["frappe.types.DF"]
 # diffs stay clean, so its lint config is honoured rather than ours.
 "cargo/workflow_engine/**" = ["RUF100", "UP046", "UP047", "I001"]
 # Copied from frappe/suite_cloud, whose lint config does not cap complexity.
-"cargo/cloud_mail/**" = ["C901"]
+"cargo/mail/**" = ["C901"]
 
 [tool.ruff.format]
 quote-style = "double"
