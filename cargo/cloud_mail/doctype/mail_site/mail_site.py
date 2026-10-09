@@ -9,6 +9,7 @@ from frappe.utils import cint, flt, now
 
 from cargo.cloud_mail.stalwart.directory import DISK_QUOTA, GB
 from cargo.cloud_mail.tenancy import sync
+from cargo.cloud_mail.utils import log_exception
 
 DIRECTORY_DOCTYPES = ("Mail Account", "Mail Group", "Mailing List", "Mail Domain")
 
@@ -38,6 +39,7 @@ class MailSite(Document):
 		max_domains: DF.Int
 		max_groups: DF.Int
 		mailboxes_allowed: DF.Check
+		send_only_account: DF.Link | None
 		max_mailing_lists: DF.Int
 		site_name: DF.Data
 		title: DF.Data | None
@@ -81,6 +83,15 @@ class MailSite(Document):
 			and frappe.db.get_value("Egress IP Pool", self.egress_pool, "cluster") != self.cluster
 		):
 			frappe.throw(_("Egress pool {0} belongs to another cluster.").format(self.egress_pool))
+
+	def after_insert(self) -> None:
+		from cargo.cloud_mail.tenancy import platform
+
+		try:
+			platform.ensure_platform_address(self)
+		except Exception:
+			# The site exists without it; the hourly job tries again.
+			log_exception(f"Could not create the platform address of {self.name}", self)
 
 	def on_update(self) -> None:
 		before = self.get_doc_before_save()
@@ -188,7 +199,8 @@ class MailSite(Document):
 		return frappe.db.count("Mail Domain", {"site": self.name})
 
 	def account_count(self) -> int:
-		return frappe.db.count("Mail Account", {"site": self.name})
+		"""The platform address is the site's but not of its making, so it is not counted."""
+		return frappe.db.count("Mail Account", {"site": self.name, "is_platform_address": 0})
 
 	def group_count(self) -> int:
 		return frappe.db.count("Mail Group", {"site": self.name})
@@ -226,6 +238,8 @@ class MailSite(Document):
 				.select(Sum(quota.value))
 				.where((holder.site == self.name) & (quota.quota == DISK_QUOTA))
 			)
+			if doctype == "Mail Account":
+				query = query.where(holder.is_platform_address == 0)
 			if exclude and exclude[0] == doctype:
 				query = query.where(holder.name != exclude[1])
 			total += cint(query.run()[0][0])
@@ -238,7 +252,7 @@ class MailSite(Document):
 			doc.set_disk_quota_gb(self.default_disk_quota_gb)
 		if doc.disk_quota_bytes() <= 0:
 			frappe.throw(_("Disk Quota must be above 0 GB."))
-		if doc.flags.adopting:
+		if doc.flags.adopting or doc.get("is_platform_address"):
 			return  # the cluster already grants it; the operator sizes the site's total afterwards
 		before = doc.get_doc_before_save()
 		if doc.is_new() or before.disk_quota_bytes() != doc.disk_quota_bytes():
@@ -289,6 +303,7 @@ class MailSite(Document):
 			"contact_email": self.contact_email,
 			"enabled": bool(self.enabled),
 			"mailboxes_allowed": bool(self.mailboxes_allowed),
+			"send_only_address": self.send_only_account,
 			"jmap_url": cluster.base_url,
 			"mail_hostname": cluster.hostname,
 			"limits": {

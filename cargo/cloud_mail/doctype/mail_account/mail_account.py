@@ -12,7 +12,7 @@ from frappe.utils.password import set_encrypted_password
 from cargo.cloud_mail.stalwart import get_account_client
 from cargo.cloud_mail.stalwart.credentials import Credential
 from cargo.cloud_mail.stalwart.directory import DISK_QUOTA, GB, Account
-from cargo.cloud_mail.tenancy import quotas, sync
+from cargo.cloud_mail.tenancy import platform, quotas, sync
 from cargo.cloud_mail.tenancy.addresses import (
 	assert_address_available,
 	assert_domain_live,
@@ -78,6 +78,10 @@ class MailAccount(QuotaHolder, Document):
 		if not self.site:
 			frappe.throw(_("An account on a domain nobody owns needs a site."))
 		self.cluster = domain.cluster
+		if platform.is_platform_domain(domain) and not self.is_platform_address and not self.flags.adopting:
+			frappe.throw(_("Addresses on {0} are issued by the platform.").format(domain.domain_name))
+		if self.is_platform_address:
+			self.disable_receiving = 1  # replies go to the human in Reply-To; nothing lands here
 		if self.is_new() and not self.flags.adopting:
 			assert_domain_live(domain)
 		if not receiving_allowed(self.site, domain):
@@ -86,7 +90,7 @@ class MailAccount(QuotaHolder, Document):
 		self.locale = (self.locale or "en-US").replace("_", "-")
 
 		site = frappe.get_cached_doc("Mail Site", self.site)
-		if self.is_new() and not self.flags.adopting:
+		if self.is_new() and not self.flags.adopting and not self.is_platform_address:
 			site.assert_can_add_account()
 		quotas.validate(self)
 		site.validate_quota_of(self)

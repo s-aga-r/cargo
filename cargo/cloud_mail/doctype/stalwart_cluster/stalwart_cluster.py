@@ -11,6 +11,7 @@ from cargo.cloud_mail.cluster import bootstrap, dns, egress, plan, reconcile
 from cargo.cloud_mail.stalwart import forget_sessions, get_admin_client, get_client
 from cargo.cloud_mail.stalwart.credentials import Credential
 from cargo.cloud_mail.utils import dkim_algorithms, log_exception, validate_version
+from cargo.service import configure_service_webhook
 
 STORE_KINDS = {
 	"data_store": "Data",
@@ -87,6 +88,7 @@ class StalwartCluster(Document):
 
 	def after_insert(self) -> None:
 		dns.sync_spf_record(self)
+		configure_mail_webhook(self)
 
 	def on_update(self) -> None:
 		before = self.get_doc_before_save()
@@ -288,6 +290,19 @@ def check_all_clusters() -> None:
 			cluster.check_drift()
 		except Exception:
 			log_exception(f"Drift check failed for {name}", cluster)
+
+
+def webhook_name_for(cluster: str) -> str:
+	return f"stalwart_cluster-{cluster}"
+
+
+def configure_mail_webhook(cluster: Document) -> None:
+	"""Point a Frappe Webhook at Central so this cluster reports its own status changes. A
+	Cargo that Central has not enrolled yet has nowhere to report, and gets the webhook when
+	the cluster next changes status."""
+	if not frappe.db.get_single_value("Cargo Settings", "central_webhook_url"):
+		return
+	configure_service_webhook(cluster, "mail", webhook_name_for(cluster.name), cluster.base_url)
 
 
 def region_cluster() -> str:

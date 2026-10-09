@@ -236,6 +236,31 @@ def activate_node(node: Document) -> None:
 	dns.sync_spf_record(node.get_cluster())
 
 
+def report_cluster_status(cluster: Document, status: str, **values) -> None:
+	"""Active and Failed reach Central through the cluster's webhook, which only a save fires."""
+	from cargo.cloud_mail.doctype.stalwart_cluster.stalwart_cluster import (
+		configure_mail_webhook,
+		webhook_name_for,
+	)
+
+	cluster.reload()
+	cluster.update({"status": status, **values})
+	cluster.save(ignore_permissions=True)
+	if not frappe.db.exists("Webhook", webhook_name_for(cluster.name)):
+		configure_mail_webhook(cluster)
+
+
+def _adopt_platform_domain(cluster: Document) -> None:
+	"""The zone becomes a Mail Domain with its records published; sites get their addresses
+	once it verifies."""
+	from cargo.cloud_mail.tenancy import platform
+
+	try:
+		platform.adopt_platform_domain(cluster)
+	except Exception:
+		log_exception(f"Could not adopt the platform domain of {cluster.name}", cluster)
+
+
 def _push_initial_config(cluster: Document) -> None:
 	"""Objects the recovery stage cannot create (the disabled-accounts role) land here."""
 
@@ -291,11 +316,12 @@ def finish_bootstrap(cluster: Document) -> bool:
 	if problem:
 		_not_ready(node, problem)
 		if node.status == "Failed":
-			cluster.db_set("status", "Failed", update_modified=False)
+			report_cluster_status(cluster, "Failed")
 		return False
 
-	cluster.db_set({"status": "Active", "last_config_sync_at": now()}, update_modified=False)
+	report_cluster_status(cluster, "Active", last_config_sync_at=now())
 	_push_initial_config(cluster)
+	_adopt_platform_domain(cluster)
 	node.db_set(
 		{
 			"node_id": (registry or {}).get("nodeId") or 0,

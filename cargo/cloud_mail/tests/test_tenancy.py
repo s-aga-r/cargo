@@ -8,6 +8,7 @@ from cargo.cloud_mail.stalwart import forget_sessions
 from cargo.cloud_mail.tenancy.addresses import get_site_domain
 from cargo.cloud_mail.tests.fake_stalwart import FakeError, FakeStalwart
 from cargo.cloud_mail.tests.fixtures import (
+	ROOT_DOMAIN,
 	activate_cluster,
 	clear_request_cache,
 	configure_settings,
@@ -1078,6 +1079,100 @@ class TestEntitlement(TenancyTestCase):
 		homeless = frappe.get_doc({"doctype": "Mail Account", "email": "nobody@shared.example"})
 		homeless.flags.password = "secret-pw"
 		self.assertRaisesRegex(frappe.ValidationError, "needs a site", homeless.insert)
+
+
+class TestPlatform(TenancyTestCase):
+	"""The region's zone as a domain nobody owns, and the send-only address every site gets on it."""
+
+	def tearDown(self) -> None:
+		# The platform domain and its addresses belong to no fixture site, so the base class
+		# would leave them for the next test to find.
+		for name in frappe.get_all("Mail Account", {"is_platform_address": 1}, pluck="name"):
+			frappe.delete_doc("Mail Account", name, force=True, ignore_permissions=True, ignore_on_trash=True)
+		frappe.db.delete("Mail Site", {"name": "acme.erpnext.test"})
+		frappe.db.delete("DNS Record", {"managed_by": self.cluster.default_domain})
+		frappe.delete_doc(
+			"Mail Domain",
+			self.cluster.default_domain,
+			force=True,
+			ignore_permissions=True,
+			ignore_on_trash=True,
+		)
+		super().tearDown()
+
+	def adopt(self, verified: bool = True):
+		from cargo.cloud_mail.tenancy import platform
+
+		self.fake._add("Domain", {"name": self.cluster.default_domain, "isEnabled": True})
+		domain = platform.adopt_platform_domain(self.cluster)
+		domain.db_set("is_verified", int(verified))
+		frappe.clear_document_cache("Mail Domain", domain.name)
+		return domain
+
+	def test_the_zone_is_adopted_with_its_records_published_in_cargo_s_zone(self) -> None:
+		from cargo.cloud_mail.tenancy import platform
+
+		domain = self.adopt(verified=False)
+
+		self.assertEqual((domain.site, domain.holds_mailboxes, domain.cluster), (None, 1, self.cluster.name))
+		self.assertTrue(domain.stalwart_id)
+		published = frappe.get_all(
+			"DNS Record",
+			{"managed_by_doctype": "Mail Domain", "managed_by": domain.name},
+			["dns_zone", "host", "type", "value", "priority"],
+			order_by="type, host",
+		)
+		self.assertEqual(
+			[(r.host, r.type, r.value, r.priority) for r in published],
+			[
+				("@", "MX", self.cluster.hostname, 10),
+				("@", "TXT", f"v=spf1 include:spf.{ROOT_DOMAIN} -all", 0),
+				("_dmarc", "TXT", f"v=DMARC1; p=reject; rua=mailto:postmaster@{ROOT_DOMAIN}", 0),
+				("_smtp._tls", "TXT", f"v=TLSRPTv1; rua=mailto:postmaster@{ROOT_DOMAIN}", 0),
+			],
+		)
+		self.assertEqual({r.dns_zone for r in published}, {ROOT_DOMAIN})
+		# Adopting again changes nothing.
+		self.assertEqual(platform.adopt_platform_domain(self.cluster).name, domain.name)
+		self.assertEqual(frappe.db.count("DNS Record", {"managed_by": domain.name}), 4)
+
+	def test_a_site_gets_its_send_only_address_once_the_domain_is_live(self) -> None:
+		from cargo.cloud_mail.tenancy import platform
+
+		self.adopt(verified=False)
+		self.assertIsNone(platform.ensure_platform_address(self.site))
+		frappe.db.set_value("Mail Domain", self.cluster.default_domain, "is_verified", 1)
+		frappe.clear_document_cache("Mail Domain", self.cluster.default_domain)
+
+		platform.provide_platform_addresses()
+		self.site.reload()
+		account = frappe.get_doc("Mail Account", self.site.send_only_account)
+		self.assertEqual(account.email, f"acme@{ROOT_DOMAIN}")
+		self.assertEqual(
+			(account.site, account.is_platform_address, account.disable_receiving), (self.site.name, 1, 1)
+		)
+		self.assertEqual(account.allotted_disk_gb(), platform.PLATFORM_ADDRESS_QUOTA_GB)
+		self.assertTrue(account.stalwart_id)
+		# It is the site's, but not of its making: it counts against no limit.
+		self.assertEqual((self.site.account_count(), self.site.allocated_disk_gb()), (0, 0))
+		self.assertEqual(self.site.to_api()["send_only_address"], account.name)
+
+	def test_a_site_created_after_the_domain_is_live_gets_its_address_at_once(self) -> None:
+		self.adopt()
+		site = make_site(self.cluster, "beta.frappe.test")
+		self.assertEqual(site.send_only_account, f"beta@{ROOT_DOMAIN}")
+
+	def test_a_taken_label_falls_back_to_the_whole_site_name(self) -> None:
+		self.adopt()
+		make_site(self.cluster, "acme.erpnext.test")
+		second = make_site(self.cluster, "acme.frappe.test")
+		self.assertEqual(second.send_only_account, f"acme-frappe-test@{ROOT_DOMAIN}")
+
+	def test_sites_may_not_make_their_own_addresses_on_the_platform_domain(self) -> None:
+		self.adopt()
+		self.assertRaisesRegex(
+			frappe.ValidationError, "issued by the platform", self.make_account, f"sales@{ROOT_DOMAIN}"
+		)
 
 
 class TestMailingList(TenancyTestCase):

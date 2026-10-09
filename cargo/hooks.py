@@ -298,6 +298,7 @@ scheduler_events = {
 		# still generating is picked up on the next pass. A failed lookup never turns one off.
 		"cargo.cloud_mail.doctype.mail_domain.mail_domain.refresh_rotating_domains",
 		"cargo.cloud_mail.doctype.mail_domain.mail_domain.verify_unverified_domains",
+		"cargo.cloud_mail.tenancy.platform.provide_platform_addresses",
 		"cargo.cloud_mail.doctype.dmarc_report.dmarc_report.fetch_all_clusters",
 		"cargo.cloud_mail.doctype.tls_report.tls_report.fetch_all_clusters",
 	],

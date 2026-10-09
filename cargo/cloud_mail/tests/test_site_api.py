@@ -704,6 +704,7 @@ class TestCentralApi(SiteApiTestCase):
 		self.assertEqual((result["title"], result["contact_email"]), ("new.frappe.test", "ops@new.test"))
 		self.assertEqual((result["cluster"], result["jmap_url"]), (self.cluster.name, self.cluster.base_url))
 		self.assertFalse(result["mailboxes_allowed"])
+		self.assertIn("send_only_address", result)  # None until the platform domain is live
 		self.assertEqual(
 			frappe.db.get_value("Mail Site", "new.frappe.test", "domain_verification_token"), "team-token"
 		)

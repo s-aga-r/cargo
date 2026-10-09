@@ -22,7 +22,7 @@ class DNSRecord(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
-		category: DF.Literal["Node", "Ingress", "Egress", "SPF", "Other"]
+		category: DF.Literal["Node", "Ingress", "Egress", "SPF", "Platform", "Other"]
 		dns_zone: DF.Link
 		host: DF.Data
 		is_verified: DF.Check

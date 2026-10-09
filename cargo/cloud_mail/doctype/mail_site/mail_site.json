@@ -19,6 +19,7 @@
   "max_groups",
   "max_mailing_lists",
   "mailboxes_allowed",
+  "send_only_account",
   "column_break_limits",
   "egress_pool",
   "max_disk_gb",
@@ -133,6 +134,14 @@
    "label": "Mailboxes Allowed"
   },
   {
+   "description": "The site's send-only address on the platform domain, created once that domain is live.",
+   "fieldname": "send_only_account",
+   "fieldtype": "Link",
+   "label": "Send-Only Account",
+   "options": "Mail Account",
+   "read_only": 1
+  },
+  {
    "fieldname": "column_break_limits",
    "fieldtype": "Column Break"
   },
@@ -205,7 +214,7 @@
    "link_fieldname": "site"
   }
  ],
- "modified": "2026-09-21 12:00:00.000000",
+ "modified": "2026-10-09 13:14:03.050135",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Mail Site",
