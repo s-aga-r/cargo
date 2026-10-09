@@ -11,7 +11,6 @@ from cargo.cloud_mail.tests.fixtures import (
 	configure_settings,
 	make_cluster,
 	make_node,
-	make_store,
 	make_zone,
 	no_dns_provider,
 	remove_cluster,
@@ -43,29 +42,21 @@ class TestStalwartCluster(IntegrationTestCase):
 			(cluster.name, cluster.hostname, cluster.default_domain, cluster.dns_zone),
 			(f"mx.{ROOT_DOMAIN}", f"mx.{ROOT_DOMAIN}", ROOT_DOMAIN, ROOT_DOMAIN),
 		)
-		store = make_store("Data", "PostgreSql", host="db", auth_secret="x")
 		second = frappe.get_doc(
-			{
-				"doctype": "Stalwart Cluster",
-				"title": "second",
-				"data_store": store.name,
-				"acme_contact_email": "ops@example.test",
-			}
+			{"doctype": "Stalwart Cluster", "title": "second", "acme_contact_email": "ops@example.test"}
 		)
 		self.assertRaisesRegex(frappe.ValidationError, "already has the cluster", second.insert)
 
-	def test_store_kind_is_enforced(self) -> None:
-		blob = make_store("Blob", "S3", region="r", bucket="b", access_key="a", secret_key="s")
-		make_dns_zone("kind.example.test", default=False)
-		cluster = frappe.get_doc(
-			{
-				"doctype": "Stalwart Cluster",
-				"title": "kind",
-				"dns_zone": "kind.example.test",
-				"data_store": blob.name,
-			}
-		)
-		self.assertRaisesRegex(frappe.ValidationError, "Data store", cluster.insert)
+	def test_a_blob_bucket_must_hold_exactly_one_credential(self) -> None:
+		cluster = make_cluster()
+		bucket = frappe.get_doc("Bucket", cluster.blob_bucket)
+		bucket.append("bucket_credentials", {"access_key": "AK2", "secret_access_key": "SK2"})
+		bucket.flags.ignore_validate = True
+		bucket.db_update()
+		for row in bucket.bucket_credentials:
+			row.db_update() if row.name else row.db_insert()
+		self.assertRaisesRegex(frappe.ValidationError, "exactly one credential", cluster.save)
+		frappe.db.delete("Bucket Credential", {"parent": "mail", "access_key": "AK2"})
 
 	def test_embedded_stores_pin_the_cluster_to_one_full_node(self) -> None:
 		cluster = make_cluster(name="solo", multi_node=False)
@@ -78,10 +69,12 @@ class TestStalwartCluster(IntegrationTestCase):
 
 		self.assertRaisesRegex(frappe.ValidationError, "one node", make_node, cluster, "203.0.113.2")
 
-		# Redis on a single node is allowed but coordinates nothing.
-		redis = make_store("In-Memory", "Redis", title="solo redis", url="redis://redis.example.test:6379")
+		# Valkey on a single node is allowed but coordinates nothing.
+		from cargo.cloud_mail.tests.fixtures import make_stores
+
+		stores = make_stores()
 		cluster.reload()  # the node insert re-saved it
-		cluster.in_memory_store = redis.name
+		cluster.in_memory_store = stores["in_memory_store"]
 		cluster.save()
 		self.assertEqual(cluster.coordinator, "Disabled")
 
@@ -383,13 +376,22 @@ class TestStalwartCluster(IntegrationTestCase):
 		self.assertEqual(value["defaultDomain"], ROOT_DOMAIN)
 		self.assertEqual(value["dataStore"]["@type"], "PostgreSql")
 		self.assertEqual(value["dataStore"]["authSecret"], {"@type": "Value", "secret": "pg-secret"})
+		self.assertEqual(
+			(value["dataStore"]["host"], value["dataStore"]["database"]), ("fdaa:1::20", "stalwart")
+		)
 		self.assertEqual(value["blobStore"]["@type"], "S3")
+		self.assertEqual((value["blobStore"]["bucket"], value["blobStore"]["accessKey"]), ("mail", "AK"))
+		self.assertEqual(value["blobStore"]["secretKey"], {"@type": "Value", "secret": "SK"})
 		self.assertEqual(value["inMemoryStore"]["@type"], "Redis")
+		self.assertEqual(value["inMemoryStore"]["url"], "redis://stalwart:vk-secret@[fdaa:1::30]:6379/0")
 		self.assertEqual(value["searchStore"], {"@type": "Default"})
 		self.assertFalse(value["requestTlsCertificate"])
 		self.assertEqual((value["tracer"]["@type"], value["tracer"]["path"]), ("Log", "/var/log/stalwart"))
 
 		operations = {op["object"]: op for op in plan.cluster_plan(cluster)}
+		# The two settable stores are re-pushed by the plan, so a rotated credential reaches the nodes.
+		self.assertEqual(operations["BlobStore"]["value"]["@type"], "S3")
+		self.assertEqual(operations["InMemoryStore"]["value"]["@type"], "Redis")
 		# Tracers have no name: matched by kind, so bootstrap's journal is turned down, not doubled.
 		self.assertEqual(operations["Tracer"]["matchOn"], ["@type"])
 		self.assertEqual(operations["Tracer"]["value"]["log"]["rotate"], "daily")

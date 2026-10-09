@@ -14,8 +14,6 @@ from cargo.cloud_mail.health.live import LiveHealth
 from cargo.cloud_mail.tenancy import sync
 from cargo.testing import make_dns_zone
 
-STORE_TITLE = "e2e RocksDb"
-
 
 def prepare(atlas_url: str) -> None:
 	"""Point Cargo at fake_atlas and give it a provider-less zone and a RocksDb cluster."""
@@ -36,19 +34,6 @@ def prepare(atlas_url: str) -> None:
 	mail_settings.update({"skip_domain_verification": 1, "verify_stalwart_tls": 0, "host_firewall": 0})
 	mail_settings.save()
 
-	store = frappe.db.exists("Stalwart Store", {"title": STORE_TITLE}) or (
-		frappe.get_doc(
-			{
-				"doctype": "Stalwart Store",
-				"title": STORE_TITLE,
-				"kind": "Data",
-				"type": "RocksDb",
-				"path": "/var/lib/stalwart",
-			}
-		)
-		.insert()
-		.name
-	)
 	cluster_name = frappe.db.exists("Stalwart Cluster", {"dns_zone": zone.name})
 	cluster = (
 		frappe.get_doc("Stalwart Cluster", cluster_name)
@@ -60,7 +45,6 @@ def prepare(atlas_url: str) -> None:
 				"dns_zone": zone.name,
 				"acme_contact_email": "ops@e2e.invalid",
 				"certificate_management": "Manual",
-				"data_store": store,
 			}
 		).insert()
 	)

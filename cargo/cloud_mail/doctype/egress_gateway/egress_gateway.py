@@ -34,7 +34,6 @@ class EgressGateway(WorkflowBuilder):
 		cluster: DF.Link
 		config_plan: DF.Code | None
 		config_version: DF.Int
-		data_store: DF.Link | None
 		enabled: DF.Check
 		hostname: DF.Data
 		installed_version: DF.Data | None
@@ -61,8 +60,6 @@ class EgressGateway(WorkflowBuilder):
 		self.admin_username = self.admin_username or "admin"
 		if not self.admin_password:
 			self.admin_password = frappe.generate_hash(length=32)
-		if not self.data_store:
-			self.data_store = self.create_local_store().name
 
 	def validate(self) -> None:
 		cluster = self.get_cluster()
@@ -101,24 +98,8 @@ class EgressGateway(WorkflowBuilder):
 
 	# --- helpers ------------------------------------------------------------------
 
-	def create_local_store(self) -> Document:
-		store = frappe.get_doc(
-			{
-				"doctype": "Stalwart Store",
-				"title": f"{self.hostname} local data",
-				"kind": "Data",
-				"type": "RocksDb",
-				"path": "/var/lib/stalwart",
-			}
-		)
-		store.insert(ignore_permissions=True)
-		return store
-
 	def get_cluster(self) -> Document:
 		return frappe.get_cached_doc("Stalwart Cluster", self.cluster)
-
-	def get_store(self, field: str = "data_store") -> Document | None:
-		return frappe.get_cached_doc("Stalwart Store", self.get(field)) if self.get(field) else None
 
 	def pools(self) -> list[Document]:
 		names = frappe.get_all(

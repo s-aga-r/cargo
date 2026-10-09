@@ -2,7 +2,7 @@
 
 The unit tests run the mail cluster against a fake Stalwart that accepts whatever it is
 given. This runs `install.sh` and `bootstrap.sh`, exactly as Cargo renders them for a
-Postgres and Redis cluster, in a systemd container against the pinned Stalwart release, then
+Postgres-backed cluster, in a systemd container against the pinned Stalwart release, then
 reads the result back through Cargo's own client: the default domain, the disabled-accounts
 role, the system hostname, and an empty drift report. That is what checks the wire format
 and the playbook gates the scripts kept.

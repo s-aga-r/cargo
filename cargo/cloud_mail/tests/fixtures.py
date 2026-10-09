@@ -11,34 +11,53 @@ from cargo.cloud_mail.tests.core_fixtures import (
 	make_zone,
 	no_dns_provider,
 )
-from cargo.testing import make_dns_zone
+from cargo.object_storage.doctype.bucket.bucket import Bucket
+from cargo.postgres.doctype.postgres_server.test_postgres_server import make_machine
+from cargo.testing import make_dns_zone, use_test_settings
 
 
-def make_store(kind: str, type: str, title: str | None = None, **fields):
-	doc = frappe.get_doc(
-		{
-			"doctype": "Stalwart Store",
-			"title": title or f"{kind} {type}",
-			"kind": kind,
-			"type": type,
-			**fields,
-		}
-	)
-	doc.insert()
-	return doc
+def make_stores() -> dict:
+	"""The three service records a multi-node cluster links, as the services would have
+	left them: nothing is asked of a Postgres, a Valkey or a Garage here."""
+	use_test_settings()
+	for doctype, name, address in (
+		("Postgres Server", "Postgres Server", "fdaa:1::20"),
+		("Valkey Server", "Valkey Server", "fdaa:1::30"),
+	):
+		server = frappe.get_single(doctype)
+		if not server.machine:
+			server.machine = make_machine(doctype, name, doctype.split()[0].lower(), address).name
+			server.save()
+		server.db_set("status", "Active")
+		frappe.clear_document_cache(doctype, name)
+	if not frappe.db.exists("Postgres Database", "stalwart"):
+		database = frappe.get_doc(
+			{"doctype": "Postgres Database", "database_name": "stalwart", "password": "pg-secret"}
+		)
+		database.flags.adopting = True
+		database.insert()
+	if not frappe.db.exists("Valkey Credential", "stalwart"):
+		credential = frappe.get_doc(
+			{"doctype": "Valkey Credential", "username": "stalwart", "password": "vk-secret"}
+		)
+		credential.flags.adopting = True
+		credential.insert()
+	if not frappe.db.exists("Bucket", "mail"):
+		cluster = (
+			frappe.db.get_value("Object Storage Cluster", {}, "name")
+			or frappe.get_doc({"doctype": "Object Storage Cluster"}).insert().name
+		)
+		with patch.object(Bucket, "provision"):
+			bucket = frappe.get_doc({"doctype": "Bucket", "bucket_name": "mail", "cluster": cluster})
+			bucket.append("bucket_credentials", {"access_key": "AK", "secret_access_key": "SK"})
+			bucket.insert()
+	return {"data_store": "stalwart", "in_memory_store": "stalwart", "blob_bucket": "mail"}
 
 
 def make_cluster(name: str = "blr-1", zone: str = ROOT_DOMAIN, multi_node: bool = True, **fields):
 	"""``name`` becomes the title; the document is named ``mx.<zone>``, and a zone other than
 	the fixture one is created on the way."""
-	if multi_node:
-		data = make_store("Data", "PostgreSql", host="db.example.test", auth_secret="pg-secret")
-		memory = make_store("In-Memory", "Redis", url="redis://redis.example.test:6379")
-		blob = make_store("Blob", "S3", region="ap-south-1", bucket="mail", access_key="AK", secret_key="SK")
-	else:
-		data = make_store("Data", "RocksDb", path="/var/lib/stalwart")
-		memory = blob = None
-
+	stores = make_stores() if multi_node else {}
 	if not frappe.db.exists("DNS Zone", zone):
 		make_dns_zone(zone, default=False)
 	remove_cluster(f"mx.{zone}")
@@ -48,9 +67,7 @@ def make_cluster(name: str = "blr-1", zone: str = ROOT_DOMAIN, multi_node: bool 
 			"title": name,
 			"acme_contact_email": "ops@example.test",
 			"dns_zone": zone,
-			"data_store": data.name,
-			"blob_store": blob.name if blob else None,
-			"in_memory_store": memory.name if memory else None,
+			**stores,
 			**fields,
 		}
 	)

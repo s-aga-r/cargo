@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import frappe
 
+from cargo.cloud_mail.cluster import stores
 from cargo.cloud_mail.stalwart.client import is_write_only
 from cargo.cloud_mail.stalwart.directory import dkim_management_payload
 from cargo.cloud_mail.utils import dkim_algorithms, password_or_none
@@ -154,16 +155,15 @@ def dns_resolver_operation() -> dict:
 def bootstrap_plan(cluster: Document) -> list[dict]:
 	"""The single Bootstrap update applied while the first node runs in bootstrap mode."""
 
-	store = cluster.get_store
 	value = {
 		"serverHostname": cluster.hostname,
 		"defaultDomain": cluster.default_domain,
 		"requestTlsCertificate": False,
 		"generateDkimKeys": False,
-		"dataStore": store("data_store").config,
-		"blobStore": store("blob_store").config if cluster.blob_store else {"@type": "Default"},
-		"searchStore": store("search_store").config if cluster.search_store else {"@type": "Default"},
-		"inMemoryStore": store("in_memory_store").config if cluster.in_memory_store else {"@type": "Default"},
+		"dataStore": stores.data_store(cluster),
+		"blobStore": stores.blob_store(cluster),
+		"searchStore": stores.DEFAULT,
+		"inMemoryStore": stores.in_memory_store(cluster),
 		"directory": {"@type": "Internal"},
 		"tracer": log_tracer(),
 		"dnsServer": {"@type": "Manual"},
@@ -177,6 +177,10 @@ def bootstrap_plan(cluster: Document) -> list[dict]:
 def cluster_plan(cluster: Document) -> list[dict]:
 	plan: list[dict] = [
 		{"@type": "update", "object": "Coordinator", "value": {"@type": cluster.coordinator or "Disabled"}},
+		# The data store is baked into config.json; these two are settings, so a rotated bucket
+		# key or Valkey password reaches the nodes through the next sync.
+		{"@type": "update", "object": "BlobStore", "value": stores.blob_store(cluster)},
+		{"@type": "update", "object": "InMemoryStore", "value": stores.in_memory_store(cluster)},
 		*defaults_plan(),
 		tracer_operation(),
 	]
@@ -444,7 +448,7 @@ def api_key_permissions() -> dict:
 def node_config(cluster: Document) -> dict:
 	"""``/etc/stalwart/config.json``: only the data store; everything else lives in it."""
 
-	return cluster.get_store("data_store").config
+	return stores.data_store(cluster)
 
 
 def node_env(node: Document, mode: str = "normal") -> dict[str, str]:

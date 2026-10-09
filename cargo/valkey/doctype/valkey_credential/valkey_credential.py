@@ -48,6 +48,8 @@ class ValkeyCredential(Document):
 
 	def before_insert(self) -> None:
 		self.set_names()
+		if self.flags.adopting:  # the server already holds it, password and all
+			return
 		server = self.get_server()
 		if server.status != "Active":
 			frappe.throw(_("The Valkey server is not active."))

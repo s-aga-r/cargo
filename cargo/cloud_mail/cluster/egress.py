@@ -13,7 +13,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_to_date, get_datetime, now
 
-from cargo.cloud_mail.cluster import dns, plan
+from cargo.cloud_mail.cluster import dns, plan, stores
 from cargo.cloud_mail.stalwart import has_credentials
 from cargo.cloud_mail.stalwart.directory import dkim_management_payload
 from cargo.cloud_mail.stalwart.errors import StalwartError
@@ -389,7 +389,7 @@ def gateway_bootstrap_plan(gateway: Document) -> list[dict]:
 		"defaultDomain": gateway.hostname,
 		"requestTlsCertificate": False,
 		"generateDkimKeys": False,
-		"dataStore": gateway.get_store("data_store").config,
+		"dataStore": stores.rocksdb_store(),
 		"blobStore": {"@type": "Default"},
 		"searchStore": {"@type": "Default"},
 		"inMemoryStore": {"@type": "Default"},
@@ -426,7 +426,7 @@ def bootstrap_environment(gateway: Document) -> tuple[dict, list[str]]:
 		"ENV_NORMAL": plan.render_env(gateway_env(gateway, "normal")),
 		"ENV_BOOTSTRAP": plan.render_env(gateway_env(gateway, "bootstrap")),
 		"ENV_RECOVERY": plan.render_env(gateway_env(gateway, "recovery")),
-		"CONFIG_JSON": frappe.as_json(gateway.get_store("data_store").config),
+		"CONFIG_JSON": frappe.as_json(stores.rocksdb_store()),
 		"BOOTSTRAP_NDJSON": plan.to_ndjson(bootstrap_plan),
 		"DEFAULTS_NDJSON": plan.to_ndjson(gateway_defaults_plan()),
 		"CLUSTER_NDJSON": plan.to_ndjson(recovery_plan),

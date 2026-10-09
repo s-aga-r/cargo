@@ -16,33 +16,48 @@ ZONE = "compat.test"
 POSTGRES_SECRET = "compat-secret"
 
 
-def _store(title: str, **fields):
-	name = frappe.db.exists("Stalwart Store", {"title": title})
-	if name:
-		return frappe.get_doc("Stalwart Store", name)
-	return frappe.get_doc({"doctype": "Stalwart Store", "title": title, **fields}).insert()
+def _postgres_database():
+	"""The container's Postgres, as a Postgres Database already holding the role run.sh made."""
+	server = frappe.get_single("Postgres Server")
+	if not server.machine:
+		server.machine = (
+			frappe.get_doc(
+				{
+					"doctype": "Machine",
+					"reference_doctype": "Postgres Server",
+					"reference_name": "Postgres Server",
+					"role": "postgres",
+					"disk_size_gb": 10,
+					"vm_id": "compat-postgres",
+					"address": "127.0.0.1",
+					"status": "Running",
+				}
+			)
+			.insert()
+			.name
+		)
+		server.save()
+	server.db_set("status", "Active")
+	frappe.clear_document_cache("Postgres Server", "Postgres Server")
+	if frappe.db.exists("Postgres Database", "stalwart"):
+		return frappe.get_doc("Postgres Database", "stalwart")
+	database = frappe.get_doc(
+		{"doctype": "Postgres Database", "database_name": "stalwart", "password": POSTGRES_SECRET}
+	)
+	database.flags.adopting = True
+	return database.insert()
 
 
 def render(directory: str) -> None:
-	"""Write install.sh and bootstrap.sh for a Postgres and Redis cluster to `directory`.
+	"""Write install.sh and bootstrap.sh for a Postgres-backed cluster to `directory`.
 
-	The container they run in has both stores on localhost. The files carry the cluster's
+	The container they run in has Postgres on localhost. The files carry the cluster's
 	secrets, so the directory is the caller's to remove."""
 	settings = frappe.get_single("Mail Settings")
 	settings.update({"verify_stalwart_tls": 0, "host_firewall": 0, "skip_domain_verification": 1})
 	settings.save()
 	zone = make_dns_zone(ZONE, default=False)
-	data = _store(
-		"compat Postgres",
-		kind="Data",
-		type="PostgreSql",
-		host="127.0.0.1",
-		port=5432,
-		database="stalwart",
-		auth_username="stalwart",
-		auth_secret=POSTGRES_SECRET,
-	)
-	memory = _store("compat Redis", kind="In-Memory", type="Redis", url="redis://127.0.0.1:6379")
+	data = _postgres_database()
 
 	name = frappe.db.exists("Stalwart Cluster", {"dns_zone": zone.name})
 	cluster = (
@@ -56,7 +71,6 @@ def render(directory: str) -> None:
 				"acme_contact_email": "ops@compat.test",
 				"certificate_management": "Manual",
 				"data_store": data.name,
-				"in_memory_store": memory.name,
 			}
 		).insert()
 	)

@@ -13,13 +13,6 @@ from cargo.cloud_mail.stalwart.credentials import Credential
 from cargo.cloud_mail.utils import dkim_algorithms, log_exception, validate_version
 from cargo.service import configure_service_webhook
 
-STORE_KINDS = {
-	"data_store": "Data",
-	"blob_store": "Blob",
-	"search_store": "Search",
-	"in_memory_store": "In-Memory",
-}
-
 
 class StalwartCluster(Document):
 	# begin: auto-generated types
@@ -36,13 +29,13 @@ class StalwartCluster(Document):
 		admin_username: DF.Data | None
 		api_key: DF.Password | None
 		base_url: DF.Data | None
-		blob_store: DF.Link | None
+		blob_bucket: DF.Link | None
 		bootstrap_node: DF.Link | None
 		certificate_management: DF.Literal["ACME", "Manual"]
 		config_plan: DF.Code | None
 		config_version: DF.Int
 		coordinator: DF.Literal["Disabled", "Default"]
-		data_store: DF.Link
+		data_store: DF.Link | None
 		default_domain: DF.Data | None
 		default_egress_pool: DF.Link | None
 		dns_zone: DF.Link
@@ -55,7 +48,6 @@ class StalwartCluster(Document):
 		last_config_sync_at: DF.Datetime | None
 		relay_password: DF.Password | None
 		relay_username: DF.Data | None
-		search_store: DF.Link | None
 		single_node: DF.Check
 		stalwart_version: DF.Data | None
 		title: DF.Data
@@ -139,24 +131,20 @@ class StalwartCluster(Document):
 		self.acme_directory_url = self.acme_directory_url or plan.ACME_DIRECTORY_URL
 
 	def validate_stores(self) -> None:
-		for field, kind in STORE_KINDS.items():
-			if store_name := self.get(field):
-				store = frappe.get_cached_doc("Stalwart Store", store_name)
-				if store.kind != kind:
-					frappe.throw(_("{0} must be a {1} store.").format(self.meta.get_label(field), kind))
-
-		# Embedded stores keep their data on one VPS, so such a cluster can never grow.
-		self.single_node = int(any(store.is_embedded for store in self.stores()))
+		"""Without a Postgres Database the data lives in RocksDB on one node, so such a
+		cluster can never grow; growing also needs Valkey for the nodes to coordinate."""
+		self.single_node = int(not self.data_store)
 		if self.single_node and self.node_count() > 1:
 			frappe.throw(
-				_("An embedded store cannot be shared by the cluster's {0} nodes.").format(self.node_count())
+				_("A RocksDB store cannot be shared by the cluster's {0} nodes.").format(self.node_count())
 			)
-
-		in_memory = self.get_store("in_memory_store")
-		has_redis = bool(in_memory and in_memory.type.startswith("Redis"))
-		self.coordinator = "Default" if has_redis and not self.single_node else "Disabled"
+		self.coordinator = "Default" if self.in_memory_store and not self.single_node else "Disabled"
 		if self.node_count() > 1 and self.coordinator == "Disabled":
-			frappe.throw(_("A multi-node cluster needs a Redis in-memory store to coordinate nodes."))
+			frappe.throw(_("A multi-node cluster needs a Valkey Credential to coordinate nodes."))
+		if self.blob_bucket:
+			rows = frappe.get_all("Bucket Credential", {"parent": self.blob_bucket, "parenttype": "Bucket"})
+			if len(rows) != 1:
+				frappe.throw(_("Blob Bucket {0} must hold exactly one credential.").format(self.blob_bucket))
 
 	# --- helpers --------------------------------------------------------------
 
@@ -175,12 +163,6 @@ class StalwartCluster(Document):
 		return [
 			frappe.get_doc("Stalwart Node", n) for n in frappe.get_all("Stalwart Node", filters, pluck="name")
 		]
-
-	def get_store(self, field: str) -> Document | None:
-		return frappe.get_cached_doc("Stalwart Store", self.get(field)) if self.get(field) else None
-
-	def stores(self) -> list[Document]:
-		return [store for field in STORE_KINDS if (store := self.get_store(field))]
 
 	def get_client(self):
 		return get_client(self)

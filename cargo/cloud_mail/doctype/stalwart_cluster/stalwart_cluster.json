@@ -23,9 +23,8 @@
   "placement_section",
   "stores_tab",
   "data_store",
-  "blob_store",
+  "blob_bucket",
   "column_break_stores",
-  "search_store",
   "in_memory_store",
   "derived_section",
   "coordinator",
@@ -173,44 +172,36 @@
    "label": "Stores"
   },
   {
-   "description": "Where settings, the directory and message metadata live. PostgreSQL or MySQL for a real cluster; RocksDB only for a single test node.",
+   "description": "The Postgres Database on the region's Postgres where settings, the directory and message metadata live. Blank runs RocksDB on one node, for a test region only.",
    "fieldname": "data_store",
    "fieldtype": "Link",
    "label": "Data Store",
-   "options": "Stalwart Store",
-   "reqd": 1
+   "options": "Postgres Database"
   },
   {
-   "description": "Where message bodies and attachments live. Leave blank to keep them in the data store; S3 is the usual choice for a cluster.",
-   "fieldname": "blob_store",
+   "description": "The Bucket on the region's object storage where message bodies live. Blank keeps them in the data store.",
+   "fieldname": "blob_bucket",
    "fieldtype": "Link",
-   "label": "Blob Store",
-   "options": "Stalwart Store"
+   "label": "Blob Bucket",
+   "options": "Bucket"
   },
   {
    "fieldname": "column_break_stores",
    "fieldtype": "Column Break"
   },
   {
-   "description": "Where the full-text index lives. Leave blank to keep it in the data store.",
-   "fieldname": "search_store",
-   "fieldtype": "Link",
-   "label": "Search Store",
-   "options": "Stalwart Store"
-  },
-  {
-   "description": "Caches, rate limits and cluster coordination. Leave blank to keep them in the data store; Redis is required for more than one node.",
+   "description": "The Valkey Credential for caches, rate limits and cluster coordination. Blank keeps them in the data store; required for more than one node.",
    "fieldname": "in_memory_store",
    "fieldtype": "Link",
    "label": "In-Memory Store",
-   "options": "Stalwart Store"
+   "options": "Valkey Credential"
   },
   {
    "fieldname": "derived_section",
    "fieldtype": "Section Break"
   },
   {
-   "description": "Derived. Default when a Redis in-memory store is set on a multi-node cluster, so nodes can coordinate through it; Disabled otherwise.",
+   "description": "Derived. Default when a Valkey credential is set on a cluster that can grow, so nodes coordinate through it; Disabled otherwise.",
    "fieldname": "coordinator",
    "fieldtype": "Select",
    "label": "Coordinator",
@@ -223,7 +214,7 @@
   },
   {
    "default": "0",
-   "description": "Derived. Set when a store is embedded (RocksDB or local files). Its data lives on one VPS and cannot be shared, so the cluster can only ever have one node.",
+   "description": "Derived. Set when there is no Postgres Database: the data then lives in RocksDB on one node and the cluster cannot grow.",
    "fieldname": "single_node",
    "fieldtype": "Check",
    "label": "Single Node Only",
@@ -423,7 +414,7 @@
    "link_fieldname": "cluster"
   }
  ],
- "modified": "2026-10-09 13:07:07.419180",
+ "modified": "2026-10-09 13:41:27.213907",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Stalwart Cluster",

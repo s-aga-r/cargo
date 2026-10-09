@@ -1,8 +1,8 @@
 #!/bin/bash
 # Prove the scripts Cargo renders against the pinned Stalwart release.
 #
-# Renders install.sh and bootstrap.sh for a Postgres + Redis cluster through Cargo's own
-# code on SITE, runs them in a systemd container that has both stores on localhost, then
+# Renders install.sh and bootstrap.sh for a Postgres-backed cluster through Cargo's own
+# code on SITE, runs them in a systemd container that has Postgres on localhost, then
 # reads Domain, Role and SystemSettings back through Cargo's client. The fake Stalwart the
 # unit tests use accepts whatever it is given; this is what checks the wire format.
 #
@@ -52,7 +52,7 @@ if ! getent hosts "$HOSTNAME_UNDER_TEST" | grep -q '^127\.0\.0\.1'; then
 	fi
 fi
 
-echo "==> Booting a systemd container with Postgres and Redis"
+echo "==> Booting a systemd container with Postgres"
 docker build -q -t "$IMAGE" "$REPO_ROOT/tools/e2e" > /dev/null
 docker run -d --name "$NAME" \
 	--privileged \
@@ -68,8 +68,8 @@ done
 docker exec "$NAME" bash -euo pipefail -c "
 	export DEBIAN_FRONTEND=noninteractive
 	apt-get update -qq
-	apt-get install -y -qq postgresql redis-server > /dev/null
-	systemctl start postgresql redis-server
+	apt-get install -y -qq postgresql > /dev/null
+	systemctl start postgresql
 	su postgres -c \"psql -qc \\\"create role stalwart login password 'compat-secret'\\\" -c 'create database stalwart owner stalwart'\"
 "
 
