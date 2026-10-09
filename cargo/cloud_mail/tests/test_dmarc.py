@@ -7,6 +7,7 @@ from frappe.utils import add_days
 from cargo.cloud_mail import reports
 from cargo.cloud_mail.api.mail import dmarc, domains
 from cargo.cloud_mail.doctype.dmarc_report import dmarc_report
+from cargo.cloud_mail.stalwart.directory import dkim_selector
 from cargo.cloud_mail.tenancy import sync
 from cargo.cloud_mail.tests.test_site_api import SiteApiTestCase
 
@@ -55,7 +56,7 @@ def record(source_ip: str, count: int, dkim: str = "pass", spf: str = "pass") ->
 		"evaluatedSpf": spf,
 		"headerFrom": "acme.com",
 		"envelopeFrom": "acme.com",
-		"dkimResults": {"0": {"domain": "acme.com", "selector": "frappemail-rsa", "result": dkim}},
+		"dkimResults": {"0": {"domain": "acme.com", "selector": dkim_selector("rsa"), "result": dkim}},
 		"spfResults": {"0": {"domain": "acme.com", "scope": "mfrom", "result": spf}},
 		"policyOverrideReasons": {}
 		if dkim == "pass"
@@ -236,7 +237,7 @@ class TestDmarcReports(SiteApiTestCase):
 		self.assertRaises(frappe.DoesNotExistError, dmarc.list_dmarc_reports, domain="other.com")
 
 		detail = dmarc.get_dmarc_report(listing["items"][0]["name"])
-		self.assertEqual(detail["records"][0]["dkim_results"][0]["selector"], "frappemail-rsa")
+		self.assertEqual(detail["records"][0]["dkim_results"][0]["selector"], dkim_selector("rsa"))
 		other_report = frappe.db.get_value("DMARC Report", {"policy_domain": "other.com"})
 		self.assertRaises(frappe.DoesNotExistError, dmarc.get_dmarc_report, other_report)
 

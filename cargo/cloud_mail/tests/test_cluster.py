@@ -6,6 +6,7 @@ from frappe.tests import IntegrationTestCase
 
 from cargo.cloud_mail.cluster import dns, plan
 from cargo.cloud_mail.doctype.stalwart_node.stalwart_node import StalwartNode
+from cargo.cloud_mail.stalwart.directory import dkim_selector, dkim_selector_template
 from cargo.cloud_mail.tests.fixtures import (
 	ROOT_DOMAIN,
 	configure_settings,
@@ -297,7 +298,7 @@ class TestStalwartCluster(IntegrationTestCase):
 			frappe.get_doc("Stalwart Cluster", cluster.name).replace_dkim_keys()
 			after = fake.find("DkimSignature", domainId=default["id"])
 			self.assertNotEqual(before["id"], after["id"])
-			self.assertEqual(after["selector"], "frappemail-rsa")
+			self.assertEqual(after["selector"], dkim_selector("rsa"))
 			self.assertEqual(
 				fake.find("Domain", name=cluster.default_domain)["dkimManagement"]["@type"], "Automatic"
 			)
@@ -412,7 +413,7 @@ class TestStalwartCluster(IntegrationTestCase):
 		self.assertEqual(domain["dnsManagement"], {"@type": "Manual"})
 		self.assertEqual(domain["dkimManagement"]["@type"], "Automatic")
 		self.assertEqual(domain["dkimManagement"]["algorithms"], {"Dkim1RsaSha256": True})
-		self.assertEqual(domain["dkimManagement"]["selectorTemplate"], "frappemail-{algorithm}")
+		self.assertEqual(domain["dkimManagement"]["selectorTemplate"], dkim_selector_template())
 		self.assertEqual(
 			operations["DnsResolver"]["value"],
 			{

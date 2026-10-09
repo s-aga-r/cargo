@@ -71,10 +71,24 @@ def single_machine_sync(doc: Document) -> None:
 
 
 def configure_service_webhook(doc: Document, service: str, name: str, endpoint: str) -> None:
-	"""Point a Frappe Webhook at Central so this service reports its own status changes.
+	"""Point a Frappe Webhook at Central so this service reports its own status changes."""
+	configure_central_webhook(
+		name,
+		doc.doctype,
+		"on_update",
+		f"doc.status in {REPORTED_STATUSES}",
+		{
+			"service": service,
+			"status": "{{ 'Available' if doc.status == 'Active' else 'Not Available' }}",
+			"service_endpoint": endpoint,
+		},
+	)
 
-	One receiver and one secret serve every service; both live on Cargo Settings, where
-	Central's enrolment put them."""
+
+def configure_central_webhook(name: str, doctype: str, docevent: str, condition: str, payload: dict) -> None:
+	"""A Frappe Webhook that tells Central about `doctype` on `docevent`, carrying `payload` on top
+	of the region. One receiver and one secret serve every delivery; both live on Cargo Settings,
+	where Central's enrolment put them."""
 	settings: CargoSettings = frappe.get_cached_doc("Cargo Settings")
 	if not settings.central_webhook_url:
 		raise frappe.ValidationError(
@@ -88,20 +102,14 @@ def configure_service_webhook(doc: Document, service: str, name: str, endpoint: 
 	webhook.name = name
 	webhook.update(
 		{
-			"webhook_doctype": doc.doctype,
-			"webhook_docevent": "on_update",
+			"webhook_doctype": doctype,
+			"webhook_docevent": docevent,
 			"request_url": settings.central_webhook_url,
 			"request_method": "POST",
 			"request_structure": "JSON",
-			"condition": f"doc.status in {REPORTED_STATUSES}",
+			"condition": condition,
 			"webhook_json": frappe.as_json(
-				{
-					"region": settings.region,
-					"region_id": settings.region_id,
-					"service": service,
-					"status": "{{ 'Available' if doc.status == 'Active' else 'Not Available' }}",
-					"service_endpoint": endpoint,
-				}
+				{"region": settings.region, "region_id": settings.region_id, **payload}
 			),
 			"webhook_headers": [
 				{"key": SOURCE_HEADER, "value": SOURCE},

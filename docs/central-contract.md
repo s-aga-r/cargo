@@ -108,6 +108,14 @@ Central registers every site it places in the region, Suite site or not, and tel
 | `resume_site(site)` | Unlocks exactly what suspension locked. |
 | `archive_site(site, delete_data=False)` | Final. Without `delete_data`, locks the mailboxes and disables every domain, which are kept for the hold in Mail Settings and may be claimed by a new site that proves control; with it, every directory object is removed at once. |
 
+### Domain grants
+
+Once Central keeps the domain registry, a site adds a domain with a grant: a `mail:domain` token Central mints for ten minutes, carrying `site`, `domain` and `holds_mailboxes`. `mail.domains.create_domain(domain, grant=...)` verifies it, requires it to name the calling site and that domain, runs the TXT proof as before, and stores `holds_mailboxes`. With `require_domain_grant` on in Mail Settings, a region refuses to add a domain without one.
+
+### Domain events
+
+Cargo tells Central about a site's domains through three deliveries on Mail Domain, to the same receiver and with the same headers as the service reports: `event` is `registered` (on insert), `changed` (when `enabled`, `is_verified` or `holds_mailboxes` changes) or `purged` (on delete), with `kind: "domain"`, `domain`, `site`, `enabled`, `verified` and `holds_mailboxes` carrying the domain's state at that moment. Domains nobody owns are not reported.
+
 ## A site calling Cargo
 
 A site reaches Cargo with a token Central minted for that site:

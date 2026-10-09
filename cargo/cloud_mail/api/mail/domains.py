@@ -4,6 +4,7 @@ from frappe.utils import sbool
 
 from cargo.cloud_mail.api.site import current_site, owned, owned_names, site_api
 from cargo.cloud_mail.doctype.mail_domain.mail_domain import domain_payloads
+from cargo.cloud_mail.tenancy import grants
 from cargo.cloud_mail.tenancy.addresses import assert_domain_not_reserved, validate_domain_name
 from cargo.cloud_mail.tenancy.ownership import ownership_record
 
@@ -52,14 +53,27 @@ def create_domain(
 	sub_addressing: bool = True,
 	allow_relaying: bool = False,
 	publish_client_discovery_records: bool = False,
+	grant: str | None = None,
 ) -> dict:
-	"""Adds the domain once its ownership record resolves; until then the error names the record."""
+	"""Adds the domain once its ownership record resolves; until then the error names the record.
+	`grant` is Central's token for this site and domain, which also says whether this region
+	holds the domain's mailboxes; a region may insist on one."""
+
+	site = current_site()
+	domain = (domain or "").strip().lower()
+	values = {}
+	if grant:
+		claims = grants.verified_grant(grant, site.name, domain)
+		values["holds_mailboxes"] = int(sbool(claims.get("holds_mailboxes", True)))
+	elif grants.required():
+		frappe.throw(_("A grant from Central is required to add a domain."), frappe.PermissionError)
 
 	doc = frappe.get_doc(
 		{
 			"doctype": "Mail Domain",
 			"domain_name": domain,
-			"site": current_site().name,
+			"site": site.name,
+			**values,
 			"description": description,
 			"catch_all_address": catch_all_address,
 			"sub_addressing": int(sbool(sub_addressing)),

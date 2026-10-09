@@ -5,6 +5,7 @@ from frappe.tests import IntegrationTestCase
 
 from cargo.cloud_mail.cluster.plan import DISABLED_ROLE_DESCRIPTION
 from cargo.cloud_mail.stalwart import forget_sessions
+from cargo.cloud_mail.stalwart.directory import dkim_selector, dkim_selector_template
 from cargo.cloud_mail.tenancy.addresses import get_site_domain
 from cargo.cloud_mail.tests.fake_stalwart import FakeError, FakeStalwart
 from cargo.cloud_mail.tests.fixtures import (
@@ -15,6 +16,7 @@ from cargo.cloud_mail.tests.fixtures import (
 	make_cluster,
 	make_site,
 )
+from cargo.testing import use_test_settings
 
 
 class TenancyTestCase(IntegrationTestCase):
@@ -145,7 +147,7 @@ class TestMailDomain(TenancyTestCase):
 		# RSA only unless the setting opts into Ed25519: many receivers ignore Ed25519 signatures.
 		# Stalwart generates and holds the key, under a fixed selector, and never rotates it.
 		self.assertEqual(live["dkimManagement"]["algorithms"], {"Dkim1RsaSha256": True})
-		self.assertEqual(live["dkimManagement"]["selectorTemplate"], "frappemail-{algorithm}")
+		self.assertEqual(live["dkimManagement"]["selectorTemplate"], dkim_selector_template())
 		self.assertGreater(live["dkimManagement"]["rotateAfter"], 50 * 365 * 24 * 60 * 60 * 1000)
 		self.assertEqual(live["dnsManagement"], {"@type": "Manual"})
 		self.assertEqual(live["reportAddressUri"], "mailto:postmaster@acme.com")
@@ -157,7 +159,7 @@ class TestMailDomain(TenancyTestCase):
 			[
 				("Ownership", "@", 1),
 				("SPF", "@", 1),
-				("DKIM", "frappemail-rsa._domainkey", 1),
+				("DKIM", f"{dkim_selector('rsa')}._domainkey", 1),
 				("DMARC", "_dmarc", 1),
 			],
 		)
@@ -627,7 +629,7 @@ class TestMailDomain(TenancyTestCase):
 		# and back: Stalwart generates nothing for a domain whose keys merely vanished.
 		after = self.fake.find("DkimSignature", domainId=domain.stalwart_id)
 		self.assertNotEqual(before["id"], after["id"])
-		self.assertEqual((after["selector"], after["stage"]), ("frappemail-rsa", "active"))
+		self.assertEqual((after["selector"], after["stage"]), (dkim_selector("rsa"), "active"))
 		management = [
 			a["update"][domain.stalwart_id]["dkimManagement"]["@type"]
 			for name, a in self.fake.calls[calls:]
@@ -636,7 +638,7 @@ class TestMailDomain(TenancyTestCase):
 		self.assertEqual(management, ["Manual", "Automatic"])
 		domain.reload()
 		dkim_row = next(r for r in domain.authentication_records if r.category == "DKIM")
-		self.assertEqual(dkim_row.host, "frappemail-rsa._domainkey")
+		self.assertEqual(dkim_row.host, f"{dkim_selector('rsa')}._domainkey")
 		self.assertNotEqual(dkim_row.value, old_value)
 		self.assertFalse(dkim_row.is_verified)  # the owner has to publish the new value
 		self.assertTrue(domain.authentication_records[0].is_verified)  # SPF keeps its state
@@ -673,7 +675,7 @@ class TestMailDomain(TenancyTestCase):
 		live = self.fake.find("Domain", name="acme.com")
 		self.assertEqual(live["dkimManagement"]["@type"], "Automatic")
 		signatures = [s["selector"] for s in self.fake.all("DkimSignature") if s["domainId"] == live["id"]]
-		self.assertEqual(signatures, ["frappemail-rsa"])
+		self.assertEqual(signatures, [dkim_selector("rsa")])
 
 	def test_domain_creation_waits_for_dkim_keys_still_being_generated(self) -> None:
 		# Stalwart generates the RSA key after the domain exists; the first zone read misses it.
@@ -696,7 +698,7 @@ class TestMailDomain(TenancyTestCase):
 		sleep.assert_called_once()
 		self.assertEqual(
 			[r.host for r in domain.authentication_records if r.category == "DKIM"],
-			["frappemail-rsa._domainkey"],
+			[f"{dkim_selector('rsa')}._domainkey"],
 		)
 		self.assertIn("_domainkey", domain.dns_zone_file)
 
@@ -711,7 +713,9 @@ class TestMailDomain(TenancyTestCase):
 			live["dkimManagement"]["algorithms"], {"Dkim1Ed25519Sha256": True, "Dkim1RsaSha256": True}
 		)
 		selectors = sorted(r.host for r in after.authentication_records if r.category == "DKIM")
-		self.assertEqual(selectors, ["frappemail-ed25519._domainkey", "frappemail-rsa._domainkey"])
+		self.assertEqual(
+			selectors, [f"{dkim_selector('ed25519')}._domainkey", f"{dkim_selector('rsa')}._domainkey"]
+		)
 
 		# The earlier domain keeps the keys it was created with; a save does not push algorithms.
 		before.description = "renamed"
@@ -1173,6 +1177,55 @@ class TestPlatform(TenancyTestCase):
 		self.assertRaisesRegex(
 			frappe.ValidationError, "issued by the platform", self.make_account, f"sales@{ROOT_DOMAIN}"
 		)
+
+
+class TestDomainEvents(TenancyTestCase):
+	"""What Central hears when a site's domain is registered, changes state or is purged."""
+
+	def setUp(self) -> None:
+		super().setUp()
+		from cargo.cloud_mail.tenancy import events
+
+		use_test_settings()
+		events.configure_domain_webhooks()
+
+	def test_every_lifecycle_moment_has_a_delivery_carrying_the_state(self) -> None:
+		from frappe.integrations.doctype.webhook.webhook import get_webhook_data
+
+		from cargo.cloud_mail.tenancy import events
+
+		self.assertTrue(events.webhooks_configured())
+		domain = self.make_domain("acme.com", holds_mailboxes=0)
+		registered = frappe.get_doc("Webhook", "mail_domain-registered")
+		self.assertEqual(registered.webhook_docevent, "after_insert")
+		payload = get_webhook_data(domain, registered)
+		self.assertEqual(
+			(payload["kind"], payload["event"], payload["domain"], payload["site"]),
+			("domain", "registered", "acme.com", self.site.name),
+		)
+		self.assertEqual(
+			(payload["enabled"], payload["verified"], payload["holds_mailboxes"]), ("1", "1", "0")
+		)
+		self.assertTrue(frappe.safe_eval(registered.condition, eval_locals={"doc": domain}))
+
+		changed = frappe.get_doc("Webhook", "mail_domain-changed")
+		domain.enabled = 0
+		self.assertTrue(frappe.safe_eval(changed.condition, eval_locals={"doc": domain}))
+		domain.reload()
+		domain.description = "only this"
+		self.assertFalse(frappe.safe_eval(changed.condition, eval_locals={"doc": domain}))
+
+		purged = frappe.get_doc("Webhook", "mail_domain-purged")
+		self.assertEqual(
+			(purged.webhook_docevent, get_webhook_data(domain, purged)["event"]), ("on_trash", "purged")
+		)
+
+	def test_domains_nobody_owns_are_not_reported(self) -> None:
+		platform = frappe.get_doc(
+			{"doctype": "Mail Domain", "domain_name": "shared.example", "is_verified": 1}
+		)
+		registered = frappe.get_doc("Webhook", "mail_domain-registered")
+		self.assertFalse(frappe.safe_eval(registered.condition, eval_locals={"doc": platform}))
 
 
 class TestMailingList(TenancyTestCase):

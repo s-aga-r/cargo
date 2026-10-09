@@ -164,6 +164,55 @@ class TestSiteResolution(SiteApiTestCase):
 		self.assertRaises(SiteSuspendedError, ping)
 
 
+class TestDomainGrants(SiteApiTestCase):
+	"""Central's say on a domain travels as a grant token the site hands to create_domain."""
+
+	def grant(self, domain: str = "acme.com", site=None, **claims) -> str:
+		return signed_token("mail:domain", site=(site or self.site).name, domain=domain, **claims)
+
+	def test_a_grant_sets_whether_this_region_holds_the_mailboxes(self) -> None:
+		created = domains.create_domain("acme.com", grant=self.grant(holds_mailboxes=False))
+		self.assertEqual(created["domain"], "acme.com")
+		self.assertFalse(frappe.db.get_value("Mail Domain", "acme.com", "holds_mailboxes"))
+		self.assertTrue(frappe.db.get_value("Mail Domain", "acme.com", "allow_relaying"))
+
+	def test_a_grant_for_another_site_or_domain_is_refused(self) -> None:
+		self.assertRaisesRegex(
+			frappe.PermissionError,
+			"another site",
+			domains.create_domain,
+			"acme.com",
+			grant=self.grant(site=self.other),
+		)
+		self.assertRaisesRegex(
+			frappe.PermissionError,
+			"another site or domain",
+			domains.create_domain,
+			"acme.com",
+			grant=self.grant("other.com"),
+		)
+		self.assertRaisesRegex(
+			frappe.PermissionError,
+			"not one Cargo accepts",
+			domains.create_domain,
+			"acme.com",
+			grant=signed_token("mail", site=self.site.name, domain="acme.com"),
+		)
+		self.assertFalse(frappe.db.exists("Mail Domain", "acme.com"))
+
+	def test_a_region_may_insist_on_a_grant(self) -> None:
+		frappe.set_user("Administrator")
+		configure_settings(require_domain_grant=1)
+		self.act_as(self.site)
+		self.assertRaisesRegex(
+			frappe.PermissionError, "grant from Central", domains.create_domain, "acme.com"
+		)
+		domains.create_domain("acme.com", grant=self.grant())
+		self.assertTrue(frappe.db.get_value("Mail Domain", "acme.com", "holds_mailboxes"))
+		frappe.set_user("Administrator")
+		configure_settings(require_domain_grant=0)
+
+
 class TestDomainOwnership(SiteApiTestCase):
 	def test_check_domain_hands_out_the_site_record(self) -> None:
 		result = domains.check_domain("Acme.com")

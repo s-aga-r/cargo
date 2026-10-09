@@ -5,6 +5,8 @@ import time
 from dataclasses import dataclass, field
 from typing import ClassVar
 
+import frappe
+
 from cargo.cloud_mail.stalwart.errors import StalwartError, StalwartKeylessDomainError
 from cargo.cloud_mail.stalwart.service import ManagementService, id_set, indexed
 
@@ -14,9 +16,10 @@ DKIM_ED25519 = "Dkim1Ed25519Sha256"
 DKIM_RSA = "Dkim1RsaSha256"
 # Stalwart's own default when a domain is created without naming its algorithms.
 DKIM_ALGORITHMS = (DKIM_ED25519, DKIM_RSA)
-# One fixed selector per key type: frappemail-rsa and frappemail-ed25519. A template is shared by
-# every key of a domain, so the algorithm has to be part of it; nothing else varies.
-DKIM_SELECTOR_TEMPLATE = "frappemail-{algorithm}"
+# One fixed selector per key type and region, cargo-<region>-rsa and cargo-<region>-ed25519: a
+# domain added in two regions publishes a key for each. A template is shared by every key of a
+# domain, so the algorithm has to be part of it.
+DKIM_SELECTOR_PREFIX = "cargo"
 DAY_MS = 24 * 60 * 60 * 1000
 # Keys are never rotated: a rotation would ask every domain owner to publish a new selector.
 # Stalwart only rotates domains under automatic DNS management anyway; this pins the rest.
@@ -219,12 +222,29 @@ def dkim_management_payload(algorithms: tuple[str, ...] | None) -> dict:
 	return {
 		"@type": "Automatic",
 		"algorithms": id_set(algorithms),
-		"selectorTemplate": DKIM_SELECTOR_TEMPLATE,
+		"selectorTemplate": dkim_selector_template(),
 		"rotateAfter": DKIM_ROTATE_AFTER_MS,
 		# Stalwart's defaults, stated so a sync sees the live object as equal.
 		"retireAfter": 7 * DAY_MS,
 		"deleteAfter": 30 * DAY_MS,
 	}
+
+
+def dkim_selector_template() -> str:
+	"""`cargo-<region>-{algorithm}`, with the region as Cargo Settings spells it."""
+	region = re.sub(
+		r"[^a-z0-9]+", "-", (frappe.db.get_single_value("Cargo Settings", "region") or "").lower()
+	).strip("-")
+	return (
+		f"{DKIM_SELECTOR_PREFIX}-{region}-{{algorithm}}"
+		if region
+		else f"{DKIM_SELECTOR_PREFIX}-{{algorithm}}"
+	)
+
+
+def dkim_selector(algorithm: str) -> str:
+	"""The selector a key of `algorithm` (``rsa`` or ``ed25519``) gets in this region."""
+	return dkim_selector_template().replace("{algorithm}", algorithm)
 
 
 def count_dkim_selectors(zone_file: str) -> int:

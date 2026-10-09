@@ -25,6 +25,7 @@ class MailSettings(Document):
 		dmarc_report_retention_days: DF.Int
 		host_firewall: DF.Check
 		ownership_miss_limit: DF.Int
+		require_domain_grant: DF.Check
 		sign_with_ed25519: DF.Check
 		skip_domain_verification: DF.Check
 		tls_report_retention_days: DF.Int

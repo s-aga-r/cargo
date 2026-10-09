@@ -7,6 +7,7 @@
   "general_tab",
   "general_section",
   "skip_domain_verification",
+  "require_domain_grant",
   "verify_stalwart_tls",
   "host_firewall",
   "jobs_section",
@@ -35,6 +36,13 @@
    "fieldname": "skip_domain_verification",
    "fieldtype": "Check",
    "label": "Skip Domain Verification"
+  },
+  {
+   "default": "0",
+   "description": "A site adds a domain only with a grant Central minted for it, once Central keeps the domain registry. Off, sites add domains on the TXT proof alone.",
+   "fieldname": "require_domain_grant",
+   "fieldtype": "Check",
+   "label": "Require Domain Grant"
   },
   {
    "default": "1",
@@ -105,7 +113,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-09 12:31:41.816826",
+ "modified": "2026-10-09 13:56:49.310507",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Mail Settings",

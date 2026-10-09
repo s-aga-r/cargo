@@ -10,6 +10,7 @@ from cargo.cargo.doctype.dns_zone.dns_zone import settings_zone
 from cargo.cloud_mail.cluster import bootstrap, dns, egress, plan, reconcile
 from cargo.cloud_mail.stalwart import forget_sessions, get_admin_client, get_client
 from cargo.cloud_mail.stalwart.credentials import Credential
+from cargo.cloud_mail.tenancy import events
 from cargo.cloud_mail.utils import dkim_algorithms, log_exception, validate_version
 from cargo.service import configure_service_webhook
 
@@ -288,6 +289,7 @@ def configure_mail_webhook(cluster: Document) -> None:
 	if not frappe.db.get_single_value("Cargo Settings", "central_webhook_url"):
 		return
 	configure_service_webhook(cluster, "mail", webhook_name_for(cluster.name), cluster.base_url)
+	events.configure_domain_webhooks()
 
 
 def region_cluster() -> str:
