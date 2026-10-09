@@ -123,7 +123,36 @@ class LiveHealth(ServiceHealth):
 		if self.nodes and len(reading.problems) == len(self.nodes):
 			return [Finding(CRITICAL, "no node answers: " + "; ".join(reading.problems.values()))]
 
-		return [*self.node_findings(reading), *self.certificate_findings(reading), *self.drift_findings()]
+		return [
+			*self.store_findings(),
+			*self.node_findings(reading),
+			*self.certificate_findings(reading),
+			*self.drift_findings(),
+		]
+
+	def store_findings(self) -> list[Finding]:
+		"""Mail is only as well as the stores it runs on. Garage or Postgres critical is mail
+		critical: bodies or the directory cannot be reached. Valkey critical costs coordination
+		and rate limits, which degrades rather than stops."""
+		findings = []
+		if self.doc.data_store:
+			postgres = frappe.get_single("Postgres Server")
+			if postgres.health == CRITICAL:
+				findings.append(
+					Finding(CRITICAL, f"the Postgres server is critical: {postgres.health_reason}")
+				)
+		if self.doc.blob_bucket:
+			storage = frappe.get_cached_value("Bucket", self.doc.blob_bucket, "cluster")
+			health, reason = frappe.db.get_value(
+				"Object Storage Cluster", storage, ["health", "health_reason"]
+			)
+			if health == CRITICAL:
+				findings.append(Finding(CRITICAL, f"object storage {storage} is critical: {reason}"))
+		if self.doc.in_memory_store and self.doc.coordinator == "Default":
+			valkey = frappe.get_single("Valkey Server")
+			if valkey.health == CRITICAL:
+				findings.append(Finding(DEGRADED, f"the Valkey server is critical: {valkey.health_reason}"))
+		return findings
 
 	def node_findings(self, reading: Reading) -> list[Finding]:
 		"""A node failing for less than `node_offline_seconds` is a blip, not a finding."""

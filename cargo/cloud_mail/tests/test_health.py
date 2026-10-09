@@ -117,6 +117,24 @@ class TestMailHealth(MailClusterTestCase):
 		self.assertTrue(drift_recorded(frappe.as_json({"error": "push failed"})))
 		self.assertFalse(drift_recorded(None))
 
+	def test_the_stores_verdicts_are_inherited(self) -> None:
+		frappe.db.set_single_value("Postgres Server", "health", CRITICAL)
+		frappe.db.set_single_value("Postgres Server", "health_reason", "postgres could not be reached")
+		frappe.clear_document_cache("Postgres Server", "Postgres Server")
+		finding = self.verdict()
+		self.assertEqual(finding.severity, CRITICAL)
+		self.assertIn("Postgres server is critical", finding.reason)
+		frappe.db.set_single_value("Postgres Server", "health", HEALTHY)
+		frappe.clear_document_cache("Postgres Server", "Postgres Server")
+
+		frappe.db.set_single_value("Valkey Server", "health", CRITICAL)
+		frappe.clear_document_cache("Valkey Server", "Valkey Server")
+		finding = self.verdict()
+		self.assertEqual(finding.severity, DEGRADED)  # coordination lost, mail still flows
+		self.assertIn("Valkey server is critical", finding.reason)
+		frappe.db.set_single_value("Valkey Server", "health", HEALTHY)
+		frappe.clear_document_cache("Valkey Server", "Valkey Server")
+
 	def test_a_cluster_that_has_not_served_is_not_judged(self) -> None:
 		self.cluster.db_set("status", "Bootstrapping")
 		self.assertEqual(self.verdict().severity, UNKNOWN)
