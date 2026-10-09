@@ -28,6 +28,8 @@ class StalwartCluster(Document):
 		admin_password: DF.Password | None
 		admin_username: DF.Data | None
 		api_key: DF.Password | None
+		auto_setup_attempts: DF.Int
+		auto_spawn: DF.Check
 		base_url: DF.Data | None
 		blob_bucket: DF.Link | None
 		bootstrap_node: DF.Link | None
@@ -41,6 +43,7 @@ class StalwartCluster(Document):
 		dns_zone: DF.Link
 		drift_report: DF.JSON | None
 		enabled: DF.Check
+		error: DF.LongText | None
 		health: DF.Literal["Unknown", "Healthy", "Degraded", "Critical"]
 		health_reason: DF.SmallText | None
 		hostname: DF.Data

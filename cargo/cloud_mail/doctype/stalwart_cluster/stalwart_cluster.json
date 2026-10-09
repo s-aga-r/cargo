@@ -13,6 +13,9 @@
   "status",
   "health",
   "health_reason",
+  "error",
+  "auto_spawn",
+  "auto_setup_attempts",
   "stalwart_version",
   "naming_section",
   "dns_zone",
@@ -110,6 +113,32 @@
    "fieldname": "health_reason",
    "fieldtype": "Small Text",
    "label": "Health Reason",
+   "read_only": 1
+  },
+  {
+   "depends_on": "error",
+   "description": "Why the spawner is stuck.",
+   "fieldname": "error",
+   "fieldtype": "Long Text",
+   "label": "Error",
+   "max_height": "16rem",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "description": "Cargo created this cluster and keeps it moving. A cluster added by hand is never advanced on its own.",
+   "fieldname": "auto_spawn",
+   "fieldtype": "Check",
+   "label": "Auto Spawn",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "depends_on": "auto_spawn",
+   "description": "Provisioning runs Cargo started by itself after a failure. It stops once the budget is spent, and clears when the cluster serves.",
+   "fieldname": "auto_setup_attempts",
+   "fieldtype": "Int",
+   "label": "Auto Setup Attempts",
    "read_only": 1
   },
   {
@@ -414,7 +443,7 @@
    "link_fieldname": "cluster"
   }
  ],
- "modified": "2026-10-09 13:41:27.213907",
+ "modified": "2026-10-09 13:45:23.299352",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Stalwart Cluster",

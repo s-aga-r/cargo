@@ -244,6 +244,12 @@ def report_cluster_status(cluster: Document, status: str, **values) -> None:
 	)
 
 	cluster.reload()
+	if status == "Active":
+		values = {
+			"auto_setup_attempts": 0,
+			"error": None,
+			**values,
+		}  # serving arms the spawner's budget again
 	cluster.update({"status": status, **values})
 	cluster.save(ignore_permissions=True)
 	if not frappe.db.exists("Webhook", webhook_name_for(cluster.name)):

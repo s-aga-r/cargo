@@ -279,6 +279,7 @@ scheduler_events = {
 			"cargo.telemetry.spawn.ensure_telemetry",
 			"cargo.postgres.spawn.ensure_postgres",
 			"cargo.valkey.spawn.ensure_valkey",
+			"cargo.cloud_mail.spawn.ensure_mail",
 			"cargo.image_builder.doctype.pilot_image.pilot_image.start_image_build_with_latest_pilot_release",
 			"cargo.image_builder.doctype.pilot_image.pilot_image.retry_failed_image_types_with_latest_version",
 			"cargo.image_builder.doctype.pilot_image.pilot_image.retire_older_images",
