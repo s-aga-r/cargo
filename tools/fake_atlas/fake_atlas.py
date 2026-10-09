@@ -57,6 +57,12 @@ FIRST_PORT = 2222
 # port. Only the gateway can publish it, so the port lands on the machine Cargo means.
 ADMIN_PORT = 3903
 GATEWAY = "gateway"
+# A mail node is reached by its public address on 443 (JMAP, health). The address this fake
+# gives out is the developer's own machine, where the container publishes that port; so, as
+# with the admin port, only one mail node can run at a time.
+MAIL = "mail"
+MAIL_PORTS = (443,)
+FAKE_PUBLIC_IPV4 = "127.0.0.1"
 # Slot names are stable across runs, so /etc/hosts is written once. Container IPs are not.
 HOST_PREFIX = "cargo-vm"
 SLOTS = 12
@@ -324,6 +330,13 @@ def published_ssh_ports() -> set[int]:
 	return {int(port) for port in re.findall(r"127\.0\.0\.1:(\d+)->22/tcp", shown.stdout)}
 
 
+def network_payload(vm: dict) -> dict:
+	"""Real Atlas reports a mesh address; here it is the slot name /etc/hosts knows. A public
+	address is handed out only when asked for, and only once the machine runs, as Atlas does."""
+	public = FAKE_PUBLIC_IPV4 if vm.get("public_ipv4") and vm["state"] == "running" else None
+	return {"egress": "uplink", "mesh_ipv6": vm["address"], "public_ipv4": public}
+
+
 def allocate_vm(vm_id: str) -> dict:
 	"""Claim the lowest free slot, which fixes the machine's name and both its ports. Claimed
 	under the lock: two concurrent requests would otherwise pick the same one."""
@@ -340,6 +353,7 @@ def allocate_vm(vm_id: str) -> dict:
 			"address": f"{HOST_PREFIX}{slot}",
 			"port": FIRST_PORT + slot - 1,
 			"role": None,
+			"public_ipv4": False,
 			"container": None,
 			"image_id": None,
 			"metadata_path": None,
@@ -424,6 +438,9 @@ def boot(
 		command += ["--add-host", f"{hostname}:host-gateway"]
 	if role == GATEWAY:
 		command += ["-p", f"127.0.0.1:{ADMIN_PORT}:{ADMIN_PORT}"]
+	if role == MAIL:
+		for port in MAIL_PORTS:
+			command += ["-p", f"127.0.0.1:{port}:{port}"]
 	if systemd:
 		command += ["--privileged", "--cgroupns=host", "-v", "/sys/fs/cgroup:/sys/fs/cgroup:rw"]
 	command += [image] + (["/sbin/init"] if systemd else ["sleep", "infinity"])
@@ -615,7 +632,9 @@ class Handler(BaseHTTPRequestHandler):
 			raise
 		hostnames = metadata_hostnames(metadata)
 		with LOCK:
-			VMS[vm_id].update(image_id=image_id, metadata_path=metadata_path)
+			VMS[vm_id].update(
+				image_id=image_id, metadata_path=metadata_path, public_ipv4=bool(payload.get("public_ipv4"))
+			)
 		write_ssh_config()
 		print(f"-> create {vm_id} ({role or 'no role'})", flush=True)
 		threading.Thread(
@@ -649,11 +668,7 @@ class Handler(BaseHTTPRequestHandler):
 			"error": None,
 			"compute": {"cpu_millicores": 1000, "memory_mib": 1024, "sleep_after_idle_seconds": 0},
 			"disk": {"size_mib": 10240, "used_mib": 0, "iops": 0, "throughput_mibps": 0},
-			"network": {
-				"egress": "uplink",
-				# Real Atlas reports a mesh address; here it is the slot name /etc/hosts knows.
-				"mesh_ipv6": vm["address"],
-			},
+			"network": network_payload(vm),
 		}
 
 	def get_virtual_machine(self, vm_id: str) -> dict:

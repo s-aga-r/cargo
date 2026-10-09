@@ -4,7 +4,7 @@ import threading
 import unittest
 from http.server import ThreadingHTTPServer
 
-from tools.fake_atlas.fake_atlas import Handler
+from tools.fake_atlas.fake_atlas import FAKE_PUBLIC_IPV4, Handler, network_payload
 
 
 class TestFakeAtlas(unittest.TestCase):
@@ -32,6 +32,15 @@ class TestFakeAtlas(unittest.TestCase):
 
 		self.assertEqual(response.status, 200)
 		self.assertEqual(payload["items"][0]["id"], "ubuntu-24.04")
+
+	def test_a_public_address_is_reported_only_when_asked_for_and_running(self):
+		pending = {"state": "pending", "address": "cargo-vm1", "public_ipv4": True}
+		self.assertIsNone(network_payload(pending)["public_ipv4"])
+		self.assertEqual(network_payload({**pending, "state": "running"})["public_ipv4"], FAKE_PUBLIC_IPV4)
+		self.assertIsNone(
+			network_payload({**pending, "state": "running", "public_ipv4": False})["public_ipv4"]
+		)
+		self.assertEqual(network_payload(pending)["mesh_ipv6"], "cargo-vm1")
 
 
 if __name__ == "__main__":
