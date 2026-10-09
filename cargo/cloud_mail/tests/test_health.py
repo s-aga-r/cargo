@@ -1,6 +1,6 @@
 """The verdict a mail cluster gets from one read of its nodes, and the log it leaves behind."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import frappe
 from frappe.tests import IntegrationTestCase
@@ -19,7 +19,9 @@ PROBE = "cargo.cloud_mail.health.live.probe_ready"
 CERTIFICATE = "cargo.cloud_mail.health.live.certificate_days_left"
 
 
-class TestMailHealth(IntegrationTestCase):
+class MailClusterTestCase(IntegrationTestCase):
+	"""An active two-node cluster with a fake Stalwart behind it."""
+
 	def setUp(self) -> None:
 		frappe.flags.do_not_enqueue = True
 		use_test_settings()
@@ -40,6 +42,8 @@ class TestMailHealth(IntegrationTestCase):
 		frappe.flags.do_not_enqueue = False
 		history_path(HISTORY_FILE).unlink(missing_ok=True)
 
+
+class TestMailHealth(MailClusterTestCase):
 	def verdict(self, probe=None, days: int = 60):
 		with (
 			self.fake.install(),
@@ -134,3 +138,69 @@ class TestMailHealth(IntegrationTestCase):
 		with patch.object(live_module.LiveHealth, "record") as record:
 			refresh_health()
 		record.assert_not_called()
+
+
+METRICS = """\
+# HELP queue_count Messages in the queue
+queue_count 3
+stalwart_smtp_connections{listener="smtp"} 2
+http_request_duration_bucket{le="0.5"} 9
+http_request_duration_sum 1.5
+"""
+INFO = {"endpoint": "https://datum.test", "token": "datum-jwt"}
+
+
+class TestMailTelemetry(MailClusterTestCase):
+	"""Every serving node's Prometheus text, relabelled and relayed."""
+
+	def answer(self, status: int = 200, text: str = METRICS):
+		response = MagicMock(status_code=status, text=text)
+		response.raise_for_status.return_value = None
+		return patch("cargo.cloud_mail.health.telemetry.requests.get", return_value=response)
+
+	def test_every_node_is_scraped_and_its_samples_prefixed_and_labelled(self) -> None:
+		from cargo.cloud_mail.health.telemetry import Telemetry
+
+		with (
+			self.answer() as get,
+			patch("cargo.cloud_mail.health.telemetry.get_metrics_info", return_value=INFO),
+			patch("cargo.cloud_mail.health.telemetry.shipping.send") as send,
+		):
+			Telemetry(frappe.get_doc("Stalwart Cluster", self.cluster.name)).ship()
+
+		self.assertEqual(
+			sorted(call.args[0] for call in get.call_args_list),
+			sorted(f"https://{node.hostname}/metrics/prometheus" for node in self.nodes),
+		)
+		self.assertEqual(get.call_args.kwargs["headers"]["Authorization"], "Bearer test-token")
+		self.assertEqual(send.call_count, 2)
+		samples = send.call_args_list[0].args[1]
+		names = {sample["metric"] for sample in samples}
+		self.assertEqual(
+			names, {"stalwart_queue_count", "stalwart_smtp_connections", "stalwart_http_request_duration_sum"}
+		)
+		labels = next(s for s in samples if s["metric"] == "stalwart_smtp_connections")["labels"]
+		self.assertEqual(labels["listener"], "smtp")
+		self.assertEqual((labels["cluster"], labels["node"]), (self.cluster.name, self.nodes[0].name))
+
+	def test_a_node_without_the_exporter_ships_nothing_and_is_no_fault(self) -> None:
+		from cargo.cloud_mail.health.telemetry import Telemetry
+
+		with (
+			self.answer(status=404, text="not found"),
+			patch("cargo.cloud_mail.health.telemetry.get_metrics_info", return_value=INFO),
+			patch("cargo.cloud_mail.health.telemetry.shipping.send") as send,
+		):
+			Telemetry(frappe.get_doc("Stalwart Cluster", self.cluster.name)).ship()
+		send.assert_not_called()
+		self.assertFalse(frappe.db.exists("Error Log", {"method": ["like", "Could not scrape%"]}))
+
+	def test_a_host_without_datum_credentials_ships_nothing(self) -> None:
+		from cargo.cloud_mail.health import ship_metrics
+
+		with (
+			patch("cargo.cloud_mail.health.get_metrics_info", side_effect=RuntimeError("no datum")),
+			patch("cargo.cloud_mail.health.Telemetry") as telemetry,
+		):
+			ship_metrics()
+		telemetry.assert_not_called()
