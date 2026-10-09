@@ -16,6 +16,8 @@ import requests
 from cryptography import x509
 from frappe.utils import add_to_date, get_datetime, now_datetime
 
+from cargo.cargo.doctype.machine.machine import DEAD_MACHINE_STATES
+from cargo.cloud_mail.cluster import bootstrap
 from cargo.cloud_mail.stalwart.errors import StalwartError
 from cargo.health.live import CRITICAL, DEGRADED, Finding
 from cargo.health.live import LiveHealth as ServiceHealth
@@ -25,6 +27,7 @@ if typing.TYPE_CHECKING:
 	from frappe.model.document import Document
 
 HISTORY_FILE = "mail_health.json.log"
+HEALTH = "Health"
 SERVING_STATUSES = ("Active", "Draining")
 READY_PATH = "/healthz/ready"
 
@@ -58,7 +61,16 @@ class LiveHealth(ServiceHealth):
 		return frappe.get_all(
 			"Stalwart Node",
 			filters={"cluster": self.doc.name, "status": ("in", SERVING_STATUSES)},
-			fields=["name", "hostname", "last_health_at"],
+			fields=[
+				"name",
+				"hostname",
+				"status",
+				"machine",
+				"last_health_at",
+				"consecutive_failures",
+				"consecutive_successes",
+				"drained_by",
+			],
 			order_by="name",
 		)
 
@@ -98,21 +110,54 @@ class LiveHealth(ServiceHealth):
 		return ""
 
 	def record_nodes(self, problems: dict[str, str]) -> None:
-		"""Each node remembers when it last answered, and how many times in a row it has not."""
+		"""Each node remembers when it last answered and how many checks in a row it passed or
+		failed; enough failures take an Active node out of ingress, never the last one still
+		answering, and enough passes put a node Health drained back. A node whose machine is
+		gone is failed outright."""
+		dead = dead_machines([node.machine for node in self.nodes if node.machine])
+		answering = [
+			node
+			for node in self.nodes
+			if node.hostname not in problems and node.status == "Active" and node.machine not in dead
+		]
 		for node in self.nodes:
-			if node.hostname in problems:
-				frappe.db.sql(
-					"""update `tabStalwart Node` set consecutive_failures = consecutive_failures + 1,
-					last_error = %s where name = %s""",
-					(problems[node.hostname][:1000], node.name),
-				)
+			if node.machine in dead:
+				bootstrap.fail_dead_node(frappe.get_doc("Stalwart Node", node.name), dead[node.machine])
+			elif node.hostname in problems:
+				self.record_failure(node, problems[node.hostname], others_answer=bool(answering))
 			else:
-				frappe.db.set_value(
-					"Stalwart Node",
-					node.name,
-					{"consecutive_failures": 0, "last_health_at": now_datetime(), "last_error": None},
-					update_modified=False,
-				)
+				self.record_success(node)
+
+	def record_failure(self, node: frappe._dict, problem: str, others_answer: bool) -> None:
+		failures = (node.consecutive_failures or 0) + 1
+		frappe.db.set_value(
+			"Stalwart Node",
+			node.name,
+			{"consecutive_failures": failures, "consecutive_successes": 0, "last_error": problem[:1000]},
+			update_modified=False,
+		)
+		if node.status == "Active" and others_answer and failures >= self.settings.auto_drain_failures:
+			bootstrap.drain_node(frappe.get_doc("Stalwart Node", node.name), drained_by=HEALTH)
+
+	def record_success(self, node: frappe._dict) -> None:
+		successes = (node.consecutive_successes or 0) + 1
+		frappe.db.set_value(
+			"Stalwart Node",
+			node.name,
+			{
+				"consecutive_failures": 0,
+				"consecutive_successes": successes,
+				"last_health_at": now_datetime(),
+				"last_error": None,
+			},
+			update_modified=False,
+		)
+		if (
+			node.status == "Draining"
+			and node.drained_by == HEALTH
+			and successes >= self.settings.auto_restore_successes
+		):
+			bootstrap.restore_node(frappe.get_doc("Stalwart Node", node.name))
 
 	def findings(self) -> list[Finding]:
 		"""An unreachable management API, or no node answering, is the only finding: the rest
@@ -193,6 +238,16 @@ class LiveHealth(ServiceHealth):
 			"problems": reading.problems,
 			"certificate_days": reading.certificate_days,
 		}
+
+
+def dead_machines(names: list[str]) -> dict[str, str]:
+	"""The machines Atlas reports gone, by name, with how."""
+	if not names:
+		return {}
+	rows = frappe.get_all(
+		"Machine", {"name": ("in", names), "status": ("in", list(DEAD_MACHINE_STATES))}, ["name", "status"]
+	)
+	return {row.name: row.status for row in rows}
 
 
 def drift_recorded(report: str | None) -> bool:

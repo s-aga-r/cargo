@@ -11,7 +11,13 @@ from cargo.cloud_mail.health import refresh_health
 from cargo.cloud_mail.health.live import HISTORY_FILE, LiveHealth, drift_recorded
 from cargo.cloud_mail.stalwart.errors import StalwartUnavailableError
 from cargo.cloud_mail.tests.fake_stalwart import FakeStalwart
-from cargo.cloud_mail.tests.fixtures import activate_cluster, configure_settings, make_cluster, make_node
+from cargo.cloud_mail.tests.fixtures import (
+	ROOT_DOMAIN,
+	activate_cluster,
+	configure_settings,
+	make_cluster,
+	make_node,
+)
 from cargo.health.live import CRITICAL, DEGRADED, HEALTHY, UNKNOWN, history_path
 from cargo.testing import use_test_settings
 
@@ -116,6 +122,62 @@ class TestMailHealth(MailClusterTestCase):
 		self.assertEqual(self.verdict().severity, HEALTHY)
 		self.assertTrue(drift_recorded(frappe.as_json({"error": "push failed"})))
 		self.assertFalse(drift_recorded(None))
+
+	def test_a_node_failing_enough_checks_is_drained_unless_it_is_the_last(self) -> None:
+		first, second = self.nodes
+		for _ in range(3):
+			self.verdict(self.failing(second.hostname))
+		second.reload()
+		self.assertEqual(
+			(second.status, second.drained_by, second.consecutive_failures), ("Draining", "Health", 3)
+		)
+		self.assertFalse(frappe.db.exists("DNS Record", {"managed_by": second.name, "host": "mx"}))
+		# The first node now fails too, but nothing else answers: it stays in ingress.
+		for _ in range(3):
+			self.verdict(self.failing(first.hostname, second.hostname))
+		first.reload()
+		self.assertEqual((first.status, first.consecutive_failures), ("Active", 3))
+
+	def test_a_node_health_drained_comes_back_after_enough_passes_an_operator_s_does_not(self) -> None:
+		first, second = self.nodes
+		second.db_set({"status": "Draining", "drained_by": "Health"})
+		first.db_set({"status": "Draining", "drained_by": "Operator"})
+		activate = lambda node: node.set_status("Active") or True  # noqa: E731
+		with patch("cargo.cloud_mail.cluster.bootstrap.check_node", side_effect=activate):
+			for _ in range(3):
+				self.verdict()
+		second.reload()
+		first.reload()
+		self.assertEqual(
+			(second.status, second.drained_by, second.consecutive_successes), ("Active", None, 3)
+		)
+		self.assertEqual((first.status, first.drained_by), ("Draining", "Operator"))
+
+	def test_a_node_whose_machine_died_is_failed_and_out_of_spf(self) -> None:
+		first, second = self.nodes
+		machine = frappe.get_doc(
+			{
+				"doctype": "Machine",
+				"reference_doctype": "Stalwart Node",
+				"reference_name": second.name,
+				"role": "mail",
+				"disk_size_gb": 40,
+				"vm_id": f"vm-{frappe.generate_hash(length=6)}",
+				"address": "fdaa:1::11",
+				"public_ipv4": "203.0.113.11",
+				"status": "Terminated",
+			}
+		).insert()
+		second.db_set("machine", machine.name)
+		finding = self.verdict()
+		second.reload()
+		self.assertEqual(second.status, "Failed")
+		self.assertIn("Terminated", second.last_error)
+		spf = frappe.db.get_value(
+			"DNS Record", {"host": "spf", "type": "TXT", "dns_zone": ROOT_DOMAIN}, "value"
+		)
+		self.assertNotIn("203.0.113.11", spf)
+		self.assertEqual(finding.severity, HEALTHY)  # the one node left answers
 
 	def test_the_stores_verdicts_are_inherited(self) -> None:
 		frappe.db.set_single_value("Postgres Server", "health", CRITICAL)

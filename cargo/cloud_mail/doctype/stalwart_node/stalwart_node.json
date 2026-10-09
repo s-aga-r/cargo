@@ -28,6 +28,7 @@
   "provisioned_at",
   "last_health_at",
   "consecutive_failures",
+  "consecutive_successes",
   "drained_by",
   "last_error",
   "setup_log"
@@ -197,6 +198,13 @@
    "read_only": 1
   },
   {
+   "description": "Health checks in a row this node passed.",
+   "fieldname": "consecutive_successes",
+   "fieldtype": "Int",
+   "label": "Consecutive Successes",
+   "read_only": 1
+  },
+  {
    "description": "Who took the node out of ingress: Health, or an operator.",
    "fieldname": "drained_by",
    "fieldtype": "Data",
@@ -225,7 +233,7 @@
    "link_fieldname": "managed_by"
   }
  ],
- "modified": "2026-10-09 12:31:41.817094",
+ "modified": "2026-10-09 14:03:50.360393",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Stalwart Node",

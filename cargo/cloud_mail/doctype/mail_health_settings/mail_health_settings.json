@@ -8,6 +8,8 @@
   "node_offline_seconds",
   "column_break_certificate",
   "certificate_warn_days",
+  "auto_drain_failures",
+  "auto_restore_successes",
   "section_break_reads",
   "read_timeout_seconds",
   "column_break_history",
@@ -38,6 +40,24 @@
    "fieldname": "certificate_warn_days",
    "fieldtype": "Int",
    "label": "Certificate Warn Days",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "default": "3",
+   "description": "Health checks in a row an Active node may fail before it is taken out of ingress. Never the last node still answering.",
+   "fieldname": "auto_drain_failures",
+   "fieldtype": "Int",
+   "label": "Auto Drain Failures",
+   "non_negative": 1,
+   "reqd": 1
+  },
+  {
+   "default": "3",
+   "description": "Health checks in a row a node Health drained must pass before it is put back. A node an operator drained stays drained.",
+   "fieldname": "auto_restore_successes",
+   "fieldtype": "Int",
+   "label": "Auto Restore Successes",
    "non_negative": 1,
    "reqd": 1
   },
@@ -73,7 +93,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-09 12:42:38.868334",
+ "modified": "2026-10-09 14:01:55.563414",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Mail Health Settings",

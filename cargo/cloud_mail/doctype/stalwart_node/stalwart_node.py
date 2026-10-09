@@ -32,6 +32,7 @@ class StalwartNode(WorkflowBuilder):
 
 		cluster: DF.Link
 		consecutive_failures: DF.Int
+		consecutive_successes: DF.Int
 		drained_by: DF.Data | None
 		enabled: DF.Check
 		hostname: DF.Data

@@ -17,6 +17,8 @@ class MailHealthSettings(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		auto_drain_failures: DF.Int
+		auto_restore_successes: DF.Int
 		certificate_warn_days: DF.Int
 		history_hours: DF.Int
 		node_offline_seconds: DF.Int
@@ -30,6 +32,8 @@ class MailHealthSettings(Document):
 			"certificate_warn_days",
 			"read_timeout_seconds",
 			"history_hours",
+			"auto_drain_failures",
+			"auto_restore_successes",
 		):
 			if self.get(fieldname) < 1:
 				frappe.throw(
