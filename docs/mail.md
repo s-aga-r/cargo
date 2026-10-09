@@ -60,4 +60,4 @@ Every five minutes each serving node's Prometheus metrics are relayed to datum u
 
 ## Validation
 
-`tools/mail-smoke/check.sh <cluster> --phase 3` is what a real region must pass: Cargo's own checks, a public resolver's answers and the certificate on every port; read [tools/mail-smoke/README.md](../tools/mail-smoke/README.md). The unit tests run against a fake Stalwart. `tools/stalwart-compat/run.sh` runs the rendered scripts against the pinned Stalwart; `tools/e2e/mail.sh` takes a single-node cluster through the real flows on fake_atlas. Neither has run yet where this was written, since that machine cannot use Docker.
+`tools/mail-smoke/check.sh <cluster> --phase 3` is what a real region must pass: Cargo's own checks, a public resolver's answers and the certificate on every port; read [tools/mail-smoke/README.md](../tools/mail-smoke/README.md). The unit tests run against a fake Stalwart. `tools/stalwart-compat/run.sh` runs the rendered scripts against the pinned Stalwart, and passes in CI; `tools/e2e/mail.sh` takes a single-node cluster through the real flows on fake_atlas and has not run yet, since the machine this was written on cannot use Docker.
