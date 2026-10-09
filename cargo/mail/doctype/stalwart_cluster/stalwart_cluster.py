@@ -12,7 +12,7 @@ from cargo.mail.stalwart import forget_sessions, get_admin_client, get_client
 from cargo.mail.stalwart.credentials import Credential
 from cargo.mail.tenancy import events
 from cargo.mail.utils import dkim_algorithms, log_exception, validate_version
-from cargo.service import configure_service_webhook
+from cargo.service import central_enrolled, configure_service_webhook
 from cargo.workflow_engine.doctype.press_workflow.decorators import flow, task
 from cargo.workflow_engine.doctype.press_workflow.workflow_builder import WorkflowBuilder
 
@@ -389,7 +389,7 @@ def configure_mail_webhook(cluster: Document) -> None:
 	"""Point a Frappe Webhook at Central so this cluster reports its own status changes. A
 	Cargo that Central has not enrolled yet has nowhere to report, and gets the webhook when
 	the cluster next changes status."""
-	if not frappe.db.get_single_value("Cargo Settings", "central_webhook_url"):
+	if not central_enrolled():
 		return
 	configure_service_webhook(cluster, "mail", webhook_name_for(cluster.name), cluster.base_url)
 	events.configure_domain_webhooks()

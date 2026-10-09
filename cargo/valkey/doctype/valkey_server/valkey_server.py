@@ -10,7 +10,13 @@ from frappe.utils import cint
 from cargo.atlas_client import base_image_id
 from cargo.cargo.doctype.machine.machine import Machine
 from cargo.client_models import VALKEY, NodeSpec
-from cargo.service import configure_service_webhook, mark, release_machine, single_machine_sync
+from cargo.service import (
+	central_enrolled,
+	configure_service_webhook,
+	mark,
+	release_machine,
+	single_machine_sync,
+)
 from cargo.ssh import OutputLog, run_over_ssh, script
 from cargo.workflow_engine.doctype.press_workflow.decorators import flow, task
 from cargo.workflow_engine.doctype.press_workflow.workflow_builder import WorkflowBuilder
@@ -65,7 +71,7 @@ class ValkeyServer(WorkflowBuilder):
 			self.admin_password = frappe.generate_hash(length=SECRET_LENGTH)
 
 	def on_update(self) -> None:
-		if self.machine and not frappe.db.exists("Webhook", WEBHOOK_NAME):
+		if self.machine and central_enrolled() and not frappe.db.exists("Webhook", WEBHOOK_NAME):
 			configure_valkey_webhook(self)
 
 	@property

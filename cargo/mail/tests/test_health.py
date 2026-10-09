@@ -266,6 +266,7 @@ class TestMailTelemetry(MailClusterTestCase):
 	def test_a_node_without_the_exporter_ships_nothing_and_is_no_fault(self) -> None:
 		from cargo.mail.health.telemetry import Telemetry
 
+		logged_before = frappe.db.count("Error Log", {"method": ["like", "Could not scrape%"]})
 		with (
 			self.answer(status=404, text="not found"),
 			patch("cargo.mail.health.telemetry.get_metrics_info", return_value=INFO),
@@ -273,7 +274,9 @@ class TestMailTelemetry(MailClusterTestCase):
 		):
 			Telemetry(frappe.get_doc("Stalwart Cluster", self.cluster.name)).ship()
 		send.assert_not_called()
-		self.assertFalse(frappe.db.exists("Error Log", {"method": ["like", "Could not scrape%"]}))
+		self.assertEqual(
+			frappe.db.count("Error Log", {"method": ["like", "Could not scrape%"]}), logged_before
+		)
 
 	def test_a_host_without_datum_credentials_ships_nothing(self) -> None:
 		from cargo.mail.health import ship_metrics

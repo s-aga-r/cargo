@@ -11,7 +11,14 @@ from cargo.atlas_client import base_image_id
 from cargo.cargo.doctype.machine.machine import Machine
 from cargo.client_models import POSTGRES, NodeSpec
 from cargo.postgres.client import ADMIN_ROLE
-from cargo.service import MESH_NETWORK, configure_service_webhook, mark, release_machine, single_machine_sync
+from cargo.service import (
+	MESH_NETWORK,
+	central_enrolled,
+	configure_service_webhook,
+	mark,
+	release_machine,
+	single_machine_sync,
+)
 from cargo.ssh import OutputLog, run_over_ssh, script
 from cargo.workflow_engine.doctype.press_workflow.decorators import flow, task
 from cargo.workflow_engine.doctype.press_workflow.workflow_builder import WorkflowBuilder
@@ -68,7 +75,7 @@ class PostgresServer(WorkflowBuilder):
 
 	def on_update(self) -> None:
 		"""Tell Central when the server settles. A record with no machine was never filled in."""
-		if self.machine and not frappe.db.exists("Webhook", WEBHOOK_NAME):
+		if self.machine and central_enrolled() and not frappe.db.exists("Webhook", WEBHOOK_NAME):
 			configure_postgres_webhook(self)
 
 	@property

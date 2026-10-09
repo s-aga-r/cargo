@@ -110,6 +110,12 @@ def single_machine_sync(doc: Document) -> None:
 		mark(doc, "Failed", _("{0} is {1}.").format(doc.machine, status))
 
 
+def central_enrolled() -> bool:
+	"""Whether Central has handed this Cargo a receiver to report to. A Cargo it has not, a
+	development bench or the compat job, has nowhere to send and builds no delivery."""
+	return bool(frappe.db.get_single_value("Cargo Settings", "central_webhook_url"))
+
+
 def configure_service_webhook(doc: Document, service: str, name: str, endpoint: str) -> None:
 	"""Point a Frappe Webhook at Central so this service reports its own status changes."""
 	configure_central_webhook(

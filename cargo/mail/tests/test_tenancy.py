@@ -1187,16 +1187,18 @@ class TestPlatform(TenancyTestCase):
 			"DNS Record",
 			{"managed_by_doctype": "Mail Domain", "managed_by": domain.name},
 			["dns_zone", "host", "type", "value", "priority"],
-			order_by="type, host",
 		)
+		# Sorted here: MariaDB and SQLite collate "@" against "_" differently.
 		self.assertEqual(
-			[(r.host, r.type, r.value, r.priority) for r in published],
-			[
-				("@", "MX", self.cluster.hostname, 10),
-				("@", "TXT", f"v=spf1 include:spf.{ROOT_DOMAIN} -all", 0),
-				("_dmarc", "TXT", f"v=DMARC1; p=reject; rua=mailto:postmaster@{ROOT_DOMAIN}", 0),
-				("_smtp._tls", "TXT", f"v=TLSRPTv1; rua=mailto:postmaster@{ROOT_DOMAIN}", 0),
-			],
+			sorted((r.host, r.type, r.value, r.priority) for r in published),
+			sorted(
+				[
+					("@", "MX", self.cluster.hostname, 10),
+					("@", "TXT", f"v=spf1 include:spf.{ROOT_DOMAIN} -all", 0),
+					("_dmarc", "TXT", f"v=DMARC1; p=reject; rua=mailto:postmaster@{ROOT_DOMAIN}", 0),
+					("_smtp._tls", "TXT", f"v=TLSRPTv1; rua=mailto:postmaster@{ROOT_DOMAIN}", 0),
+				]
+			),
 		)
 		self.assertEqual({r.dns_zone for r in published}, {ROOT_DOMAIN})
 		# Adopting again changes nothing.

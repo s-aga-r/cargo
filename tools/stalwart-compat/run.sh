@@ -38,7 +38,7 @@ value() {
 docker rm -f "$NAME" > /dev/null 2>&1 || true
 
 echo "==> Rendering the scripts"
-rendered="$(execute render "{\"directory\": \"$WORK\"}")"
+rendered="$(execute render "{\"directory\": \"$WORK\"}" 2>&1)" || { echo "$rendered" | tail -15 >&2; exit 2; }
 HOSTNAME_UNDER_TEST="$(value "$rendered" hostname)"
 MARKER="$(value "$rendered" marker)"
 echo "    $HOSTNAME_UNDER_TEST"

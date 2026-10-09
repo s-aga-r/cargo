@@ -12,7 +12,15 @@ from cargo.cargo.doctype.dns_record.dns_record import reconcile_managed_records
 from cargo.cargo.doctype.dns_zone.dns_zone import settings_zone
 from cargo.cargo.doctype.machine.machine import DEAD_MACHINE_STATES, Machine
 from cargo.client_models import SFU, NodeSpec
-from cargo.service import ANYWHERE, configure_service_webhook, firewall, firewall_rule, mark, release_machine
+from cargo.service import (
+	ANYWHERE,
+	central_enrolled,
+	configure_service_webhook,
+	firewall,
+	firewall_rule,
+	mark,
+	release_machine,
+)
 from cargo.ssh import OutputLog, run_over_ssh, script
 from cargo.workflow_engine.doctype.press_workflow.decorators import flow, task
 from cargo.workflow_engine.doctype.press_workflow.workflow_builder import WorkflowBuilder
@@ -77,7 +85,7 @@ class SFUServer(WorkflowBuilder):
 				self.set(field, frappe.generate_hash(length=SECRET_LENGTH))
 
 	def on_update(self) -> None:
-		if self.machine and not frappe.db.exists("Webhook", WEBHOOK_NAME):
+		if self.machine and central_enrolled() and not frappe.db.exists("Webhook", WEBHOOK_NAME):
 			configure_service_webhook(self, "sfu", WEBHOOK_NAME, self.service_endpoint)
 
 	@property
