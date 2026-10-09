@@ -280,6 +280,7 @@ scheduler_events = {
 			"cargo.postgres.spawn.ensure_postgres",
 			"cargo.valkey.spawn.ensure_valkey",
 			"cargo.cloud_mail.spawn.ensure_mail",
+			"cargo.sfu.spawn.ensure_sfu",
 			"cargo.image_builder.doctype.pilot_image.pilot_image.start_image_build_with_latest_pilot_release",
 			"cargo.image_builder.doctype.pilot_image.pilot_image.retry_failed_image_types_with_latest_version",
 			"cargo.image_builder.doctype.pilot_image.pilot_image.retire_older_images",
@@ -289,6 +290,7 @@ scheduler_events = {
 			"cargo.cloud_mail.health.refresh_health",
 			"cargo.postgres.health.refresh_health",
 			"cargo.valkey.health.refresh_health",
+			"cargo.sfu.health.refresh_health",
 		],
 		# One SSH session per node, so five minutes rather than one. Nothing Garage
 		# exports moves meaningfully faster.
@@ -302,6 +304,7 @@ scheduler_events = {
 		"cargo.cloud_mail.health.prune_history",
 		"cargo.postgres.health.prune_history",
 		"cargo.valkey.health.prune_history",
+		"cargo.sfu.health.prune_history",
 		# A customer domain goes live once its records resolve, and a DKIM key the cluster was
 		# still generating is picked up on the next pass. A failed lookup never turns one off.
 		"cargo.cloud_mail.doctype.mail_domain.mail_domain.refresh_rotating_domains",

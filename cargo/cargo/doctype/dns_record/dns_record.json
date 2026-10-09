@@ -66,13 +66,13 @@
   },
   {
    "default": "Other",
-   "description": "What the record is for. Node: a server's own hostname. Ingress: the cluster hostname's round-robin entry. Egress: gateway, pool and EHLO hostnames. SPF: the include target customer domains reference. Platform: the platform domain's own MX, DKIM, DMARC and TLS-RPT. Other: created by hand.",
+   "description": "What the record is for. Node: a server's own hostname. Ingress: the cluster hostname's round-robin entry. Egress: gateway, pool and EHLO hostnames. SPF: the include target customer domains reference. Platform: the platform domain's own MX, DKIM, DMARC and TLS-RPT. Service: a single-machine service reached by name, such as the SFU. Other: created by hand.",
    "fieldname": "category",
    "fieldtype": "Select",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Category",
-   "options": "Node\nIngress\nEgress\nSPF\nPlatform\nOther",
+   "options": "Node\nIngress\nEgress\nSPF\nPlatform\nService\nOther",
    "reqd": 1
   },
   {
@@ -173,7 +173,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-09 13:17:28.359271",
+ "modified": "2026-10-09 14:10:04.126224",
  "modified_by": "Administrator",
  "module": "Cargo",
  "name": "DNS Record",

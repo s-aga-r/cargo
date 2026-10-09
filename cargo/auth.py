@@ -19,7 +19,7 @@ ALGORITHM = "EdDSA"
 SITE_CLAIM = "site"
 # The scope a site's own token carries; the wide ones are Central's and Atlas's alone.
 SITE_SCOPE = "mail"
-WIDE_SCOPES = frozenset({"mail:*", "bucket:*"})
+WIDE_SCOPES = frozenset({"mail:*", "bucket:*", "sfu:*"})
 
 jwks_clients: dict[str, PyJWKClient] = {}
 

@@ -106,6 +106,10 @@ A host builds the region's Valkey when the site config holds `default_valkey_con
 
 A host builds the region's mail cluster when the site config holds `default_mail_cluster_config` and the region's object storage, Postgres, Valkey and DNS Zone are in place. Read [mail](mail.md).
 
+## SFU
+
+A host builds the region's SFU when the site config holds `default_sfu_config` and a DNS Zone is named. It is reached at `sfu.<zone>` directly, not through the Proxy, and reports to Central as service `sfu`. Read [sfu](sfu.md).
+
 ## Authentication
 
 Cargo calls Atlas with `Authorization: Bearer <atlas_token>` and `X-Tenant-ID: 0`. The token has audience `atlas-admin:<region-id>`, subject `cargo`, scope `*`, tenant `0`, and a 365-day lifetime.

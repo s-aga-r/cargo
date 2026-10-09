@@ -32,6 +32,28 @@ MESH_NETWORK = "fdaa::/16"
 TRUSTED_PROXIES = ("127.0.0.1", "::1", MESH_NETWORK)
 
 
+ANYWHERE = ("0.0.0.0/0", "::/0")
+
+
+def firewall(public_rules: list[dict]) -> dict:
+	"""What Atlas lets into a machine that faces the Internet: default deny inbound, everything
+	out, the mesh in to anything, ICMP, and the service's own ports. SSH never leaves the mesh."""
+	return {
+		"enabled": True,
+		"inbound": [
+			{"protocol": "any", "cidrs": [MESH_NETWORK]},
+			{"protocol": "icmp", "cidrs": list(ANYWHERE)},
+			*public_rules,
+		],
+		"outbound": [{"protocol": "any", "cidrs": list(ANYWHERE)}],
+	}
+
+
+def firewall_rule(protocol: str, ports: int | str, cidrs=ANYWHERE) -> dict:
+	"""One inbound rule; `ports` is a port or an inclusive range such as ``40000-40003``."""
+	return {"protocol": protocol, "ports": str(ports), "cidrs": list(cidrs)}
+
+
 def wildcard_domain() -> str:
 	domain = frappe.db.get_single_value("Cargo Settings", "wildcard_domain", cache=True)
 	if not domain:

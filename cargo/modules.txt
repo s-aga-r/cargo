@@ -6,3 +6,4 @@ Telemetry
 Cloud Mail
 Postgres
 Valkey
+SFU

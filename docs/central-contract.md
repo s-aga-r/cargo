@@ -116,6 +116,10 @@ Once Central keeps the domain registry, a site adds a domain with a grant: a `ma
 
 Cargo tells Central about a site's domains through three deliveries on Mail Domain, to the same receiver and with the same headers as the service reports: `event` is `registered` (on insert), `changed` (when `enabled`, `is_verified` or `holds_mailboxes` changes) or `purged` (on delete), with `kind: "domain"`, `domain`, `site`, `enabled`, `verified` and `holds_mailboxes` carrying the domain's state at that moment. Domains nobody owns are not reported.
 
+### SFU
+
+Central fetches a region's SFU credential, `sfu_server_url` and `sfu_secret`, from `cargo.sfu.api.get_credential` with a token of scope `sfu:*`, which only Central holds, and configures sites with it. The SFU reports as service `sfu` with its public HTTPS URL.
+
 ## A site calling Cargo
 
 A site reaches Cargo with a token Central minted for that site:

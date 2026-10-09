@@ -354,6 +354,8 @@ Ends when `check.sh --phase 7` is green: a Suite site adds a domain through a gr
 
 ## SFU
 
+Built on 2026-10-09 as `cargo/sfu/`: an SFU Server Single in the Postgres Server shape, a machine with a public IPv4 and a firewall of TCP 80 and 443 plus one UDP port per worker, `sfu.<zone>` published in Cargo's zone, the Suite project's own Docker deployment installed from a pinned ref, health on `/health`, `service: "sfu"`, and `cargo.sfu.api.get_credential` behind `sfu:*` for Central. Read [sfu.md](sfu.md). The push to sites is Central's and Pilot's, as the mail credential is.
+
 SFU is a fourth consumer of phase 2b: one `Machine` with `public_ipv4`, the `cargo/service.py` helpers without proxy routes, an `install.sh` over SSH, `service: "sfu"` through `configure_service_webhook`, `health` and `health_reason` on `cargo/health/`, and its secret delivered to sites the way the mail credential is, through a Pilot site action. Its Atlas asks are the generic ones below, with TCP 80 and 443 and a UDP range for media. Nothing here is mail-specific, and D1's open service list means it costs Central no further change.
 
 ## Contract changes
