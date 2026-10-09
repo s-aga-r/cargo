@@ -337,6 +337,8 @@ Suite Cloud's README lists these as never run on a live server: several nodes wi
 3. Kill one node's machine and replace it, with mail flowing throughout. Stop Valkey, record, restart.
 4. Egress Gateway on a Machine with several public addresses (track C2), a local RocksDb store, `sync_firewall`. Plain sites send through a pool separate from Suite sites.
 
+Cargo's part done in code on 2026-10-09: auto-drain and auto-restore in `MailHealth` with `auto_drain_failures` and `auto_restore_successes` in Mail Health Settings, a dead machine failing its node out of ingress and SPF, and the serialised `upgrade_nodes` flow on the cluster with `soak_minutes` in Mail Settings. Not done: `sync_firewall` and a gateway on a multi-address machine, which wait for Atlas (track C2); the drills themselves, which need a region. Plain sites send through whatever pool the platform Mail Domain names, which an operator sets on that domain.
+
 Ends when `check.sh --phase 6` is green across the upgrade, the rollback, the node replacement and the Valkey restart on a three-node cluster, counting sent messages at the receiving mailbox.
 
 ### Phase 7: Suite sites, customer domains, several regions
@@ -345,6 +347,8 @@ Ends when `check.sh --phase 6` is green across the upgrade, the rollback, the no
 2. Coexistence. A Suite site uses Cargo when that condition holds and the old Suite Cloud client otherwise, until its data is migrated. A Suite Cloud customer domain is not registered in Central until then, so it cannot collide with the registry.
 3. Central adds `mail_domain_grant`, `Mail Domain Registry` and the `kind: "domain"` handling; Pilot adds the second allow-list entry.
 4. Second-region domains follow the registry rules; DKIM selectors carry the region.
+
+Cargo's part done in code on 2026-10-09: `create_domain(domain, grant)` with `require_domain_grant` in Mail Settings, the three `kind: "domain"` deliveries on Mail Domain carrying the domain's state, and `cargo-<region>-<algorithm>` selectors. The Suite client, Central's registry and Pilot's allow-list entry are theirs.
 
 Ends when `check.sh --phase 7` is green: a Suite site adds a domain through a grant and a mailbox end to end, and no new domain carries a `frappemail-*` selector. Rollback: the Suite app keeps its old client until Suite Cloud is retired.
 

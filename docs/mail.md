@@ -48,7 +48,9 @@ Every five minutes each serving node's Prometheus metrics are relayed to datum u
 
 **A node's machine died.** Health marks it; release the Machine, request a new one on the same node record, and provision. The hostname and its DNS names stay.
 
-**Upgrading.** Set the cluster's `stalwart_version`, then Upgrade each node: it is drained, the new binary installed beside the old, restarted, and promoted again once its lease is active. Rollback flips the symlink back. One node at a time, and read the release notes about mixed versions first.
+**Upgrading.** Set the cluster's `stalwart_version`, then Upgrade Nodes on the cluster: each Active node in turn, the bootstrap node last, is drained, gets the new binary beside the old, restarts, rejoins ingress once its lease is active, and soaks for `soak_minutes` with the cluster Healthy before the next is touched. A failure stops the flow with that node out of ingress and its log on the record. A single node can be upgraded or rolled back on its own; rollback flips the symlink back. Read the release notes about mixed versions first.
+
+**A node Health drained.** After `auto_drain_failures` failed checks an Active node leaves ingress with `drained_by` Health, unless it is the last one answering; it returns by itself after `auto_restore_successes` passes. A node an operator drained is the operator's to restore.
 
 **Store credentials rotated.** Rotate on the Postgres Database or Valkey Credential, then Reconfigure each node: the data store is baked into `config.json`, the rest reaches the nodes through the next config sync.
 
