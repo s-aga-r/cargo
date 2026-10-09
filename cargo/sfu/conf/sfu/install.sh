@@ -41,31 +41,39 @@ export SFU_INSTALL_DIR="$INSTALL_DIR"
 curl -fsSL "$INSTALLER" | bash -s "$SUITE_REF"
 
 # The environment is Cargo's, written whole each run; the installer's template is not kept.
+# The deployment sources this file as shell, so a value may hold nothing shell would read.
+for value in "$JWT_SECRET" "$METRICS_TOKEN" "$DOMAIN" "$SSL_EMAIL" "$SFU_IMAGE"; do
+	case "$value" in
+		*[\'\"\\\$\`\#\ ]*) echo "a value holds a character the deployment's .env cannot carry" >&2; exit 1 ;;
+	esac
+done
 install -m 600 /dev/null "$INSTALL_DIR/.env.new"
-cat > "$INSTALL_DIR/.env.new" <<ENV
-DOMAIN=$DOMAIN
-SSL_EMAIL=$SSL_EMAIL
-SFU_IMAGE=$SFU_IMAGE
-JWT_SECRET=$JWT_SECRET
-METRICS_TOKEN=$METRICS_TOKEN
-PORT=3000
-HOST=127.0.0.1
-SOCKET_PING_TIMEOUT=60000
-SOCKET_PING_INTERVAL=25000
-WEBRTC_LISTEN_IP=
-WEBRTC_ANNOUNCED_IP=$WEBRTC_ANNOUNCED_IP
-WEBRTC_SERVER_PORT=$WEBRTC_SERVER_PORT
-MEDIASOUP_NUM_WORKERS=$MEDIASOUP_NUM_WORKERS
-MEDIASOUP_WORKER_LOGLEVEL=warn
-STT_SERVER_URL=${STT_SERVER_URL:-http://127.0.0.1:8000}
-SFU_LOG_LEVEL=info
-ALLOY_ENVIRONMENT=production
-SENTRY_ENVIRONMENT=production
-ENV
+{
+	printf '%s=%s\n' DOMAIN "$DOMAIN"
+	printf '%s=%s\n' SSL_EMAIL "$SSL_EMAIL"
+	printf '%s=%s\n' SFU_IMAGE "$SFU_IMAGE"
+	printf '%s=%s\n' JWT_SECRET "$JWT_SECRET"
+	printf '%s=%s\n' METRICS_TOKEN "$METRICS_TOKEN"
+	printf '%s=%s\n' PORT 3000
+	printf '%s=%s\n' HOST 127.0.0.1
+	printf '%s=%s\n' SOCKET_PING_TIMEOUT 60000
+	printf '%s=%s\n' SOCKET_PING_INTERVAL 25000
+	printf '%s=%s\n' WEBRTC_LISTEN_IP ""
+	printf '%s=%s\n' WEBRTC_ANNOUNCED_IP "$WEBRTC_ANNOUNCED_IP"
+	printf '%s=%s\n' WEBRTC_SERVER_PORT "$WEBRTC_SERVER_PORT"
+	printf '%s=%s\n' MEDIASOUP_NUM_WORKERS "$MEDIASOUP_NUM_WORKERS"
+	printf '%s=%s\n' MEDIASOUP_WORKER_LOGLEVEL warn
+	printf '%s=%s\n' STT_SERVER_URL "${STT_SERVER_URL:-http://127.0.0.1:8000}"
+	printf '%s=%s\n' SFU_LOG_LEVEL info
+	printf '%s=%s\n' ALLOY_ENVIRONMENT production
+	printf '%s=%s\n' SENTRY_ENVIRONMENT production
+} >> "$INSTALL_DIR/.env.new"
 mv "$INSTALL_DIR/.env.new" "$INSTALL_DIR/.env"
 
 cd "$INSTALL_DIR"
-./deploy.sh setup
+# This script arrives on stdin; a child that reads stdin (certbot through docker compose run
+# does) would swallow the rest of it, so children get none.
+./deploy.sh setup < /dev/null
 
 for _ in $(seq 1 60); do
 	if curl -fs -o /dev/null http://127.0.0.1:3000/health; then

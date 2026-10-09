@@ -21,7 +21,10 @@ class IntegrationTestPostgresBackup(IntegrationTestCase):
 		self.server.machine = make_machine("Postgres Server", "Postgres Server", "postgres").name
 		self.server.save()
 		self.server.db_set("status", "Active")
-		with patch("cargo.postgres.doctype.postgres_database.postgres_database.run"):
+		with (
+			patch("cargo.postgres.doctype.postgres_database.postgres_database.run"),
+			patch("cargo.postgres.doctype.postgres_database.postgres_database.query", return_value=[]),
+		):
 			frappe.get_doc({"doctype": "Postgres Database", "database_name": "stalwart"}).insert()
 
 	def tearDown(self) -> None:

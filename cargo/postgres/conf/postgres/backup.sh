@@ -11,11 +11,13 @@ set -euo pipefail
 : "${S3_SECRET_KEY:?S3_SECRET_KEY is required}"
 PORT="${PORT:-5432}"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
+umask 077 # a dump on disk is root's alone while it uploads
 
 for database in $DATABASES; do
 	file="/tmp/$database-$STAMP.sql.gz"
 	su postgres -c "pg_dump -p '$PORT' --no-owner --no-privileges '$database'" | gzip > "$file"
-	curl -fsS --aws-sigv4 "aws:amz:$S3_REGION:s3" --user "$S3_ACCESS_KEY:$S3_SECRET_KEY" \
+	# The key goes to curl through a config file descriptor, never its argv.
+	curl -fsS --aws-sigv4 "aws:amz:$S3_REGION:s3" -K <(printf 'user = "%s:%s"\n' "$S3_ACCESS_KEY" "$S3_SECRET_KEY") \
 		-T "$file" "$S3_ENDPOINT/$S3_BUCKET/$database/$STAMP.sql.gz" > /dev/null
 	rm -f "$file"
 	echo "dumped $database"

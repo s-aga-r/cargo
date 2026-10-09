@@ -26,4 +26,6 @@ for port in $WAIT_PORTS; do
 		sleep 2
 	done
 done
+[ -n "$WAIT_PORTS" ] || sleep 10
+systemctl is-active --quiet stalwart || { journalctl -u stalwart --no-pager --lines 30 >&2; exit 1; }
 /usr/local/bin/stalwart --version

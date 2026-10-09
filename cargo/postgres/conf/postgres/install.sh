@@ -50,13 +50,17 @@ su postgres -c "pg_isready -h '$LISTEN_ADDRESS' -p '$PORT'" || { journalctl -u p
 
 # Cargo's role: it makes databases and the roles that own them, and reads health. Not a
 # superuser, so a leaked password cannot read another service's data.
+# Quoted for SQL, and a failing statement is kept out of the server log, where it would
+# otherwise land with the password in it.
+PASSWORD_SQL="${ADMIN_PASSWORD//\'/\'\'}"
 ROLE_SQL=$(cat <<SQL
+SET log_min_error_statement TO panic;
 DO \$\$
 BEGIN
 	IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$ADMIN_ROLE') THEN
-		EXECUTE format('CREATE ROLE %I LOGIN CREATEDB CREATEROLE PASSWORD %L', '$ADMIN_ROLE', '$ADMIN_PASSWORD');
+		EXECUTE format('CREATE ROLE %I LOGIN CREATEDB CREATEROLE PASSWORD %L', '$ADMIN_ROLE', '$PASSWORD_SQL');
 	ELSE
-		EXECUTE format('ALTER ROLE %I LOGIN CREATEDB CREATEROLE PASSWORD %L', '$ADMIN_ROLE', '$ADMIN_PASSWORD');
+		EXECUTE format('ALTER ROLE %I LOGIN CREATEDB CREATEROLE PASSWORD %L', '$ADMIN_ROLE', '$PASSWORD_SQL');
 	END IF;
 END
 \$\$;

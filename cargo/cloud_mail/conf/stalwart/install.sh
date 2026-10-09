@@ -80,15 +80,17 @@ install_release() {
 		[ -L "/usr/local/bin/$name" ] && cp -P "/usr/local/bin/$name" "/usr/local/bin/$name.previous"
 		ln -sfn "$versioned" "/usr/local/bin/$name"
 	fi
-	# Two versions are kept: the one serving and the one before it.
-	ls -1t "/usr/local/bin/$name"-* 2>/dev/null | tail -n +3 | xargs -r rm -f
+	# Two versions are kept: the one serving and the one before it. Only this binary's versions:
+	# stalwart-* would also match stalwart-cli and the .previous link.
+	find /usr/local/bin -maxdepth 1 -type f -name "$name-v*" -printf "%f\n" | sort -V | head -n -2 \
+		| while read -r old; do rm -f "/usr/local/bin/$old"; done
 }
 
 install_release stalwart "$STALWART_VERSION" "$STALWART_URL_TEMPLATE" "$target" tar.gz
 install_release stalwart-cli "$STALWART_CLI_VERSION" "$STALWART_CLI_URL_TEMPLATE" "$cli_target" tar.xz
 
 unit_path=/etc/systemd/system/stalwart.service
-if [ ! -f "$unit_path" ] || [ "$(cat "$unit_path")" != "$SYSTEMD_UNIT" ]; then
+if [ ! -f "$unit_path" ] || ! cmp -s "$unit_path" <(printf '%s\n' "$SYSTEMD_UNIT"); then
 	printf '%s\n' "$SYSTEMD_UNIT" > "$unit_path"
 	systemctl daemon-reload
 fi

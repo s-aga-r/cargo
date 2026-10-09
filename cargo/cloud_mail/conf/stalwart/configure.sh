@@ -40,6 +40,7 @@ else
 	# An outbound-only node opens nothing to wait for; give it a moment to finish starting.
 	sleep 10
 fi
+systemctl is-active --quiet stalwart || { journalctl -u stalwart --no-pager --lines 30 >&2; exit 1; }
 
 since="$(date -u -d "$(systemctl show -p ActiveEnterTimestamp --value stalwart)" +%Y-%m-%dT%H:%M:%SZ)"
 errors="$(grep -hE 'registry\.(validation-error|build-error)' /var/log/stalwart/stalwart* 2>/dev/null | awk -v since="$since" '$1 >= since' || true)"

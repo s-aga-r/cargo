@@ -62,7 +62,7 @@ docker run -d --name "$NAME" \
 	-p 127.0.0.1:443:443 \
 	"$IMAGE" > /dev/null
 for _ in $(seq 1 60); do
-	docker exec "$NAME" systemctl is-system-running --wait > /dev/null 2>&1 && break
+	docker exec "$NAME" systemctl is-system-running --wait 2>/dev/null | grep -qE "running|degraded" && break
 	sleep 1
 done
 docker exec "$NAME" bash -euo pipefail -c "

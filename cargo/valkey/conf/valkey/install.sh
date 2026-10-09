@@ -86,7 +86,7 @@ systemctl enable --quiet valkey
 systemctl restart valkey
 
 for _ in $(seq 1 30); do
-	if valkey-cli -h "$LISTEN_ADDRESS" -p "$PORT" --user default --pass "$ADMIN_PASSWORD" --no-auth-warning ping 2>/dev/null | grep -q PONG; then
+	if REDISCLI_AUTH="$ADMIN_PASSWORD" valkey-cli -h "$LISTEN_ADDRESS" -p "$PORT" --user default ping 2>/dev/null | grep -q PONG; then
 		echo "valkey $VALKEY_VERSION is serving on [$LISTEN_ADDRESS]:$PORT"
 		exit 0
 	fi

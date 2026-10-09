@@ -27,8 +27,21 @@ export STALWART_PASSWORD="$ADMIN_PASSWORD"
 # Plans name the store credentials; whatever happens they must not outlive this run, and the
 # node must be left on its normal environment, never a recovery one.
 cleanup() {
-	rm -f "$ETC"/bootstrap.ndjson "$ETC"/defaults.ndjson "$ETC"/cluster.ndjson
+	local status=$?
+	rm -f "$ETC"/bootstrap.ndjson "$ETC"/defaults.ndjson "$ETC"/cluster.ndjson "$ETC"/apply.out
 	write_secret "$ETC/stalwart.env" "$ENV_NORMAL"
+	# A failed run must not leave Stalwart serving a recovery admin on the recovery port.
+	[ "$status" = 0 ] || systemctl stop stalwart || true
+}
+
+# The applied records echo every object, store credentials included; they are read only when
+# the apply failed, and the masker covers what it knows of.
+apply_quietly() {
+	if ! "$CLI" apply --file "$1" --json > "$ETC/apply.out" 2>&1; then
+		cat "$ETC/apply.out" >&2
+		exit 1
+	fi
+	rm -f "$ETC/apply.out"
 }
 trap cleanup EXIT
 
@@ -58,7 +71,7 @@ restart_in() {
 
 if [ ! -f "$ETC/config.json" ]; then
 	# A marker left from an earlier data store would skip the cluster plan for this one.
-	find "$ETC" -maxdepth 1 -name ".cargo-plan-*" -delete
+	find "$ETC" -maxdepth 1 -name ".suite-cloud-plan-*" -delete
 	restart_in "$ENV_BOOTSTRAP"
 	wait_for_port "$RECOVERY_PORT"
 	write_secret "$ETC/bootstrap.ndjson" "$BOOTSTRAP_NDJSON"
@@ -85,7 +98,7 @@ if [ ! -f "$ETC/config.json" ]; then
 	restart_in "$ENV_RECOVERY"
 	wait_for_port "$RECOVERY_PORT"
 	write_secret "$ETC/defaults.ndjson" "$DEFAULTS_NDJSON"
-	"$CLI" apply --file "$ETC/defaults.ndjson" --json
+	apply_quietly "$ETC/defaults.ndjson"
 
 	# Stalwart provisions its built-in roles and default lists only on a normal start; without
 	# it the administrator and every account would resolve to no permissions at all.
@@ -98,8 +111,10 @@ if [ ! -f "$ETC/$PLAN_MARKER" ]; then
 	restart_in "$ENV_RECOVERY"
 	wait_for_port "$RECOVERY_PORT"
 	write_secret "$ETC/cluster.ndjson" "$CLUSTER_NDJSON"
-	"$CLI" apply --file "$ETC/cluster.ndjson" --json
-	# Written only after a successful apply, so a failed plan is tried again next run.
+	apply_quietly "$ETC/cluster.ndjson"
+	# Written only after a successful apply, so a failed plan is tried again next run; the
+	# marker of the plan before it goes, so exactly one says what the node holds.
+	find "$ETC" -maxdepth 1 -name ".suite-cloud-plan-*" -delete
 	echo "$CONFIG_VERSION" > "$ETC/$PLAN_MARKER"
 fi
 
