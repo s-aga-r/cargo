@@ -63,8 +63,9 @@ class SFUServer(WorkflowBuilder):
 			frappe.throw(_("Workers must be between 1 and 64."), frappe.ValidationError)
 		if not 1024 <= cint(self.media_port) <= 65535 - cint(self.workers):
 			frappe.throw(_("Media Port must leave room for one UDP port per worker below 65536."))
-		if self.ssl_email:
-			frappe.utils.validate_email_address(self.ssl_email, throw=True)
+		if not self.ssl_email:
+			frappe.throw(_("SSL Email is required: the certificate authority writes to it."))
+		frappe.utils.validate_email_address(self.ssl_email, throw=True)
 		zone = settings_zone()
 		if not zone:
 			frappe.throw(_("Name a DNS Zone on Cargo Settings first: the SFU is reached by name."))

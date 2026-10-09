@@ -36,10 +36,9 @@ class LiveHealth(ServiceHealth):
 			info = client.command(self.doc, "INFO", "memory")
 		except (client.Error, frappe.ValidationError) as error:
 			return Reading(error=str(error).strip())
-		values = dict(line.split(":", 1) for line in str(info).splitlines() if ":" in line)
-		return Reading(
-			used_memory=int(values.get("used_memory", 0)), max_memory=int(values.get("maxmemory", 0))
-		)
+		if not isinstance(info, dict):  # redis-py parses INFO; a raw reply is read the same way
+			info = dict(line.split(":", 1) for line in str(info).splitlines() if ":" in line)
+		return Reading(used_memory=int(info.get("used_memory", 0)), max_memory=int(info.get("maxmemory", 0)))
 
 	def findings(self) -> list[Finding]:
 		reading = self.reading

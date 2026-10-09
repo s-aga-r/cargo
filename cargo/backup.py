@@ -56,13 +56,17 @@ def backup_database() -> None:
 	if not bucket:
 		return
 
-	generated = new_backup(ignore_files=True, compress=True, force=True)
+	if not frappe.flags.in_test:
+		frappe.db.commit()  # nosemgrep: the bucket is on Garage now; a failure below must not forget it
+
+	# The database only. site_config.json carries the encryption key that reads the dump's
+	# secrets, and that key is the operator's to keep out of the region.
+	generated = new_backup(ignore_files=True, ignore_conf=True, compress=True, force=True)
 	client = s3_client(bucket)
 	prefix = f"{frappe.local.site}/"
 	stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-	for path in (generated.backup_path_db, generated.backup_path_conf):
-		if path and Path(path).exists():
-			client.upload_file(str(path), BUCKET_NAME, f"{prefix}{stamp}/{Path(path).name}")
+	path = Path(generated.backup_path_db)
+	client.upload_file(str(path), BUCKET_NAME, f"{prefix}{stamp}/{path.name}")
 
 	prune_dumps(client, prefix)
 

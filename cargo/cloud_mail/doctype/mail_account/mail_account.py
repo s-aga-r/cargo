@@ -80,8 +80,12 @@ class MailAccount(QuotaHolder, Document):
 		self.cluster = domain.cluster
 		if platform.is_platform_domain(domain) and not self.is_platform_address and not self.flags.adopting:
 			frappe.throw(_("Addresses on {0} are issued by the platform.").format(domain.domain_name))
+		before = self.get_doc_before_save()
+		if before and bool(before.is_platform_address) != bool(self.is_platform_address):
+			frappe.throw(_("Whether an address is the platform's is not a site's to change."))
 		if self.is_platform_address:
 			self.disable_receiving = 1  # replies go to the human in Reply-To; nothing lands here
+			self.set_disk_quota_gb(platform.PLATFORM_ADDRESS_QUOTA_GB)  # fixed; outside the site's total
 		if self.is_new() and not self.flags.adopting:
 			assert_domain_live(domain)
 		if not receiving_allowed(self.site, domain):
@@ -160,6 +164,8 @@ class MailAccount(QuotaHolder, Document):
 			self.set_password(self.flags.password)
 
 	def on_trash(self) -> None:
+		if self.is_platform_address and not self.flags.purging and self.site_is_active():
+			frappe.throw(_("The platform address of a living site is not deleted; archive the site."))
 		sync.push_destroy(self, "accounts")
 
 	# --- Stalwart ------------------------------------------------------------------

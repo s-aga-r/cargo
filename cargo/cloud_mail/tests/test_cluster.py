@@ -385,6 +385,10 @@ class TestStalwartCluster(IntegrationTestCase):
 		self.assertEqual(value["blobStore"]["secretKey"], {"@type": "Value", "secret": "SK"})
 		self.assertEqual(value["inMemoryStore"]["@type"], "Redis")
 		self.assertEqual(value["inMemoryStore"]["url"], "redis://stalwart:vk-secret@[fdaa:1::30]:6379/0")
+		# The Valkey password travels inside a URL: masked like any secret, never in the stored plan.
+		self.assertIn("vk-secret", plan.secret_strings(plan.bootstrap_plan(cluster)))
+		self.assertNotIn("vk-secret", plan.redacted(plan.bootstrap_plan(cluster)))
+		self.assertIn("redis://stalwart:", plan.redacted(plan.bootstrap_plan(cluster)))
 		self.assertEqual(value["searchStore"], {"@type": "Default"})
 		self.assertFalse(value["requestTlsCertificate"])
 		self.assertEqual((value["tracer"]["@type"], value["tracer"]["path"]), ("Log", "/var/log/stalwart"))

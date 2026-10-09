@@ -9,7 +9,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-from cargo.postgres.client import identifier, literal, run
+from cargo.postgres.client import identifier, literal, query, run
 
 NAME = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 SECRET_LENGTH = 32
@@ -55,13 +55,20 @@ class PostgresDatabase(Document):
 		if server.status != "Active":
 			frappe.throw(_("The Postgres server is not active."))
 		self.password = frappe.generate_hash(length=SECRET_LENGTH)
-		run(
-			server,
-			[
-				f"CREATE ROLE {identifier(self.username)} LOGIN PASSWORD {literal(self.password)}",
-				f"CREATE DATABASE {identifier(self.database_name)} OWNER {identifier(self.username)}",
-			],
-		)
+		# Idempotent: a run rolled back after the server did its part leaves the role and the
+		# database behind, and the next run must take them over rather than trip on them.
+		statements = [
+			"DO $$ BEGIN "
+			f"IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = {literal(self.username)}) THEN "
+			f"ALTER ROLE {identifier(self.username)} LOGIN PASSWORD {literal(self.password)}; "
+			f"ELSE CREATE ROLE {identifier(self.username)} LOGIN PASSWORD {literal(self.password)}; "
+			"END IF; END $$"
+		]
+		if not query(server, "SELECT 1 FROM pg_database WHERE datname = %s", (self.database_name,)):
+			statements.append(
+				f"CREATE DATABASE {identifier(self.database_name)} OWNER {identifier(self.username)}"
+			)
+		run(server, statements)
 		self.created_on_server = 1
 
 	def on_trash(self) -> None:

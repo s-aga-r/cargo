@@ -68,7 +68,7 @@ class TestRollingUpgrade(IntegrationTestCase):
 	def test_the_steps_run_in_order_for_each_node(self) -> None:
 		flow = frappe.new_doc("Stalwart Cluster")._upgrade_nodes._wrapped
 		names = [n for n, _ in called_methods_in_order(StalwartCluster, flow)]
-		self.assertEqual(names, ["upgrade_node", "wait_until_serving", "soak"])
+		self.assertEqual(names, ["plan_upgrade", "upgrade_node", "wait_until_serving", "soak"])
 
 	def test_the_bootstrap_node_goes_last(self) -> None:
 		self.assertEqual(upgrade_order(self.cluster), [self.nodes[1].name, self.nodes[0].name])

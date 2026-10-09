@@ -32,7 +32,10 @@ class IntegrationTestPostgresDatabase(IntegrationTestCase):
 		return list(run.call_args.args[1])
 
 	def test_creating_one_makes_the_role_then_the_database_it_owns(self) -> None:
-		with patch("cargo.postgres.doctype.postgres_database.postgres_database.run") as run:
+		with (
+			patch("cargo.postgres.doctype.postgres_database.postgres_database.run") as run,
+			patch("cargo.postgres.doctype.postgres_database.postgres_database.query", return_value=[]),
+		):
 			database = frappe.get_doc({"doctype": "Postgres Database", "database_name": "Stalwart"}).insert()
 
 		self.assertEqual(
@@ -41,7 +44,10 @@ class IntegrationTestPostgresDatabase(IntegrationTestCase):
 		password = database.get_password("password")
 		self.assertEqual(len(password), 32)
 		statements = self.statements(run)
-		self.assertEqual(statements[0], f"CREATE ROLE \"stalwart\" LOGIN PASSWORD '{password}'")
+		self.assertIn(f"ELSE CREATE ROLE \"stalwart\" LOGIN PASSWORD '{password}'", statements[0])
+		self.assertIn(
+			f"ALTER ROLE \"stalwart\" LOGIN PASSWORD '{password}'", statements[0]
+		)  # a role left behind is taken over
 		self.assertEqual(statements[1], 'CREATE DATABASE "stalwart" OWNER "stalwart"')
 		connection = database.connection()
 		self.assertEqual(
@@ -56,7 +62,10 @@ class IntegrationTestPostgresDatabase(IntegrationTestCase):
 				self.assertRaises(frappe.ValidationError, doc.insert)
 
 	def test_rotating_changes_the_role_s_password_and_the_record(self) -> None:
-		with patch("cargo.postgres.doctype.postgres_database.postgres_database.run"):
+		with (
+			patch("cargo.postgres.doctype.postgres_database.postgres_database.run"),
+			patch("cargo.postgres.doctype.postgres_database.postgres_database.query", return_value=[]),
+		):
 			database = frappe.get_doc({"doctype": "Postgres Database", "database_name": "mail"}).insert()
 		before = database.get_password("password")
 		with patch("cargo.postgres.doctype.postgres_database.postgres_database.run") as run:
@@ -66,7 +75,10 @@ class IntegrationTestPostgresDatabase(IntegrationTestCase):
 		self.assertEqual(self.statements(run), [f"ALTER ROLE \"mail\" PASSWORD '{after}'"])
 
 	def test_deleting_ends_its_connections_then_drops_both(self) -> None:
-		with patch("cargo.postgres.doctype.postgres_database.postgres_database.run"):
+		with (
+			patch("cargo.postgres.doctype.postgres_database.postgres_database.run"),
+			patch("cargo.postgres.doctype.postgres_database.postgres_database.query", return_value=[]),
+		):
 			database = frappe.get_doc({"doctype": "Postgres Database", "database_name": "gone"}).insert()
 		with patch("cargo.postgres.doctype.postgres_database.postgres_database.run") as run:
 			database.delete()

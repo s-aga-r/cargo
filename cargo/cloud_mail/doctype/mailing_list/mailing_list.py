@@ -8,7 +8,7 @@ from frappe.query_builder.functions import Count
 from frappe.utils import cint, now
 
 from cargo.cloud_mail.stalwart.directory import MailingList as StalwartMailingList
-from cargo.cloud_mail.tenancy import sync
+from cargo.cloud_mail.tenancy import platform, sync
 from cargo.cloud_mail.tenancy.addresses import (
 	assert_address_available,
 	assert_addresses_deliverable,
@@ -67,6 +67,8 @@ class MailingList(Document):
 		if not self.site:
 			frappe.throw(_("A {0} on a domain nobody owns needs a site.").format(_(self.doctype)))
 		self.cluster = domain.cluster
+		if platform.is_platform_domain(domain) and not self.flags.adopting:
+			frappe.throw(_("Addresses on {0} are issued by the platform.").format(domain.domain_name))
 		if self.is_new() and not self.flags.adopting:
 			assert_domain_live(domain)
 			assert_receiving_allowed(self.site, domain)

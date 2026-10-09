@@ -56,7 +56,11 @@ class ValkeyCredential(Document):
 		self.password = frappe.generate_hash(length=SECRET_LENGTH)
 		commands(
 			server,
-			[("ACL", "SETUSER", self.username, "on", f">{self.password}", *RULES), ("ACL", "SAVE")],
+			# resetpass first: a user left behind by a rolled-back run keeps no password of its own
+			[
+				("ACL", "SETUSER", self.username, "on", "resetpass", f">{self.password}", *RULES),
+				("ACL", "SAVE"),
+			],
 		)
 		self.created_on_server = 1
 

@@ -37,7 +37,7 @@ class IntegrationTestDatabaseBackup(IntegrationTestCase):
 			backup.backup_database()
 		new_backup.assert_not_called()
 
-	def test_the_dump_and_the_site_config_are_uploaded_under_the_site_and_the_time(self) -> None:
+	def test_only_the_dump_is_uploaded_under_the_site_and_the_time(self) -> None:
 		bucket = frappe._dict(cluster="OSC-0001", bucket_credentials=[])
 		client = MagicMock()
 		client.list_objects_v2.return_value = {"Contents": []}
@@ -50,11 +50,12 @@ class IntegrationTestDatabaseBackup(IntegrationTestCase):
 			backup.backup_database()
 
 		self.assertTrue(new_backup.call_args.kwargs["ignore_files"])
+		self.assertTrue(
+			new_backup.call_args.kwargs["ignore_conf"]
+		)  # the encryption key stays out of the region
 		keys = sorted(call.args[2] for call in client.upload_file.call_args_list)
-		self.assertEqual(len(keys), 2)
-		self.assertTrue(all(key.startswith(f"{frappe.local.site}/") for key in keys))
-		self.assertTrue(keys[0].endswith("x-database.sql.gz"))
-		self.assertTrue(keys[1].endswith("x-site_config_backup.json"))
+		self.assertEqual(len(keys), 1)
+		self.assertTrue(keys[0].startswith(f"{frappe.local.site}/") and keys[0].endswith("x-database.sql.gz"))
 		self.assertEqual({call.args[1] for call in client.upload_file.call_args_list}, {backup.BUCKET_NAME})
 
 	def test_dumps_past_the_window_are_deleted_and_recent_ones_kept(self) -> None:

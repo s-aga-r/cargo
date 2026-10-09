@@ -288,6 +288,7 @@ scheduler_events = {
 			# is what sets alerting latency; the read is two calls to the gateway.
 			"cargo.object_storage.health.refresh_health",
 			"cargo.cloud_mail.health.refresh_health",
+			"cargo.cloud_mail.cluster.bootstrap.poll_pending",
 			"cargo.postgres.health.refresh_health",
 			"cargo.valkey.health.refresh_health",
 			"cargo.sfu.health.refresh_health",

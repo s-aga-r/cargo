@@ -8,7 +8,7 @@ import frappe
 from frappe import _
 
 from cargo.cloud_mail.cluster.stores import POOL_MAX_CONNECTIONS
-from cargo.spawn import MAX_SETUP_ATTEMPTS, report_dead_machines, run_spawner, validate_node_size
+from cargo.spawn import MAX_SETUP_ATTEMPTS, report, report_dead_machines, run_spawner, validate_node_size
 
 if typing.TYPE_CHECKING:
 	from cargo.cloud_mail.doctype.stalwart_cluster.stalwart_cluster import StalwartCluster
@@ -143,6 +143,7 @@ def fill_nodes(cluster: StalwartCluster, config: dict) -> bool:
 
 def add_node(cluster: StalwartCluster, config: dict) -> None:
 	size = config[NODE]
+	frappe.db.savepoint("mail_node")
 	try:
 		node = frappe.get_doc({"doctype": "Stalwart Node", "cluster": cluster.name, "role": "full"}).insert(
 			ignore_permissions=True
@@ -151,8 +152,13 @@ def add_node(cluster: StalwartCluster, config: dict) -> None:
 			cpu_millicores=size["cpu_millicores"], ram_gb=size["ram_gb"], disk_gb=size["disk_gb"]
 		)
 	except Exception:
+		# Machine.request leaves a Draft row when Atlas refuses: the node and the row go together,
+		# or the next run would count a node that has no machine.
+		frappe.db.rollback(save_point="mail_node")
 		frappe.log_error(title=f"{cluster.name} could not add a node")
+		report(cluster, _("Atlas refused a machine for {0}; see the Error Log.").format(cluster.name))
 		return
+	report(cluster, "")
 	if not frappe.flags.in_test:
 		frappe.db.commit()  # nosemgrep: each machine in a transaction of its own, as object storage does
 

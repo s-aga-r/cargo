@@ -70,6 +70,7 @@ class LiveHealth(ServiceHealth):
 				"consecutive_failures",
 				"consecutive_successes",
 				"drained_by",
+				"enabled",
 			],
 			order_by="name",
 		)
@@ -154,6 +155,7 @@ class LiveHealth(ServiceHealth):
 		)
 		if (
 			node.status == "Draining"
+			and node.enabled
 			and node.drained_by == HEALTH
 			and successes >= self.settings.auto_restore_successes
 		):

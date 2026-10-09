@@ -47,23 +47,29 @@ def backup_databases() -> None:
 	server: PostgresServer = frappe.get_single("Postgres Server")
 	if server.status != "Active":
 		return
-	databases = frappe.get_all("Postgres Database", {"created_on_server": 1}, pluck="database_name")
+	databases = frappe.get_all("Postgres Database", pluck="database_name")  # adopted ones included
 	bucket = backup_bucket(server) if databases else None
 	if not bucket:
 		return
+	if not frappe.flags.in_test:
+		frappe.db.commit()  # nosemgrep: the bucket is on Garage now; a failed dump must not forget it
 
 	machine = frappe.get_doc("Machine", server.machine)
 	environment = backup_environment(server, bucket, databases)
 	with OutputLog(server, "setup_log", append=True) as log:
-		run_over_ssh(
-			machine.address,
-			script(*CONF, environment=environment),
-			machine.get_password("ssh_private_key"),
-			timeout=BACKUP_TIMEOUT,
-			on_output=log.write,
-			pin=machine.host_key_pin(),
-			secrets=[environment["S3_SECRET_KEY"]],
-		)
+		try:
+			run_over_ssh(
+				machine.address,
+				script(*CONF, environment=environment),
+				machine.get_password("ssh_private_key"),
+				timeout=BACKUP_TIMEOUT,
+				on_output=log.write,
+				pin=machine.host_key_pin(),
+				secrets=[environment["S3_SECRET_KEY"]],
+			)
+		except Exception:
+			frappe.log_error(title="Postgres dump failed", message=frappe.get_traceback(with_context=False))
+			return
 	client = s3_client(bucket)
 	for database in databases:
 		prune_dumps(client, f"{database}/", RETENTION_DAYS, bucket=bucket.bucket_name)

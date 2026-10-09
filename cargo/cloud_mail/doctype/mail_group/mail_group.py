@@ -7,7 +7,7 @@ from frappe.model.document import Document
 from frappe.utils import cint, flt
 
 from cargo.cloud_mail.stalwart.directory import DISK_QUOTA, GB, Group
-from cargo.cloud_mail.tenancy import quotas, sync
+from cargo.cloud_mail.tenancy import platform, quotas, sync
 from cargo.cloud_mail.tenancy.addresses import (
 	assert_address_available,
 	assert_domain_live,
@@ -54,6 +54,8 @@ class MailGroup(QuotaHolder, Document):
 		if not self.site:
 			frappe.throw(_("A {0} on a domain nobody owns needs a site.").format(_(self.doctype)))
 		self.cluster = domain.cluster
+		if platform.is_platform_domain(domain) and not self.flags.adopting:
+			frappe.throw(_("Addresses on {0} are issued by the platform.").format(domain.domain_name))
 		if self.is_new() and not self.flags.adopting:
 			assert_domain_live(domain)
 			assert_receiving_allowed(self.site, domain)

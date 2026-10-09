@@ -10,6 +10,7 @@ plan, applied before the first normal start.
 
 import hashlib
 import json
+import re
 from typing import TYPE_CHECKING
 
 import frappe
@@ -538,6 +539,8 @@ def _collect_secrets(value, found: list[str]) -> None:
 		for key, item in value.items():
 			if key in SECRET_KEYS and isinstance(item, str) and item:
 				found.append(item)
+			elif password := url_password(item):
+				found.append(password)
 			else:
 				_collect_secrets(item, found)
 	elif isinstance(value, list):
@@ -574,12 +577,27 @@ SECRET_KEYS = {
 }
 
 
+URL_PASSWORD = re.compile(r"^(\w+://[^/@:]*:)([^@]+)(@)")
+
+
+def url_password(value) -> str | None:
+	"""The password carried in a `scheme://user:password@host` URL, such as a Redis store's."""
+	match = URL_PASSWORD.match(value) if isinstance(value, str) else None
+	return match.group(2) if match else None
+
+
 def _redact(value):
 	if isinstance(value, dict):
 		if value.get("@type") == "Value" and "secret" in value:
 			return {"@type": "Value", "secret": SECRET_MARKER}
 		return {
-			k: (SECRET_MARKER if k in SECRET_KEYS and isinstance(v, str) else _redact(v))
+			k: (
+				SECRET_MARKER
+				if k in SECRET_KEYS and isinstance(v, str)
+				else URL_PASSWORD.sub(rf"\g<1>{SECRET_MARKER}\g<3>", v)
+				if url_password(v)
+				else _redact(v)
+			)
 			for k, v in value.items()
 		}
 	if isinstance(value, list):

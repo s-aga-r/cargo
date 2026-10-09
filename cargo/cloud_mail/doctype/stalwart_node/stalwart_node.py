@@ -103,8 +103,11 @@ class StalwartNode(WorkflowBuilder):
 			dns.sync_node_records(self)
 			dns.sync_spf_record(self.get_cluster())
 
-		if before.enabled and not self.enabled and self.status in ("Active", "Provisioned"):
-			bootstrap.drain_node(self)
+		if before.enabled and not self.enabled:
+			if self.status in ("Active", "Provisioned"):
+				bootstrap.drain_node(self)
+			elif self.status == "Draining":
+				self.db_set("drained_by", "Operator", update_modified=False)  # Health hands it over
 
 	def on_trash(self) -> None:
 		if self.status not in REMOVABLE_STATUSES:
@@ -190,8 +193,20 @@ class StalwartNode(WorkflowBuilder):
 		if not self.ipv4_address:
 			frappe.throw(_("The node has no public address yet."))
 		bootstrap.needs_bootstrap(self)  # refused now rather than half-way through
+		cluster = self.get_cluster()
+		if cluster.status != "Active" and frappe.db.exists(
+			"Stalwart Node", {"cluster": self.cluster, "status": "Provisioning", "name": ["!=", self.name]}
+		):
+			frappe.throw(_("Another node is bringing the cluster up; provision this one once it is active."))
 		self.set_status("Provisioning")
 		self._provision.run_as_workflow()
+
+	def on_workflow_failure(self, workflow) -> None:
+		"""A task that raised outside run_script: the node must not stay Provisioning forever."""
+		if self.status == "Provisioning":
+			self.set_status(
+				"Failed", _("Provisioning failed in {0}. See the workflow.").format(workflow.name)
+			)
 
 	@flow
 	def _provision(self) -> None:

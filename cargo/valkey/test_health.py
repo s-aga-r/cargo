@@ -13,8 +13,6 @@ from cargo.testing import use_test_settings
 from cargo.valkey.doctype.valkey_server.test_valkey_server import reset_valkey_server
 from cargo.valkey.health.live import LiveHealth
 
-INFO = "# Memory\r\nused_memory:{used}\r\nmaxmemory:{maximum}\r\n"
-
 
 class IntegrationTestValkeyHealth(IntegrationTestCase):
 	def setUp(self) -> None:
@@ -34,12 +32,14 @@ class IntegrationTestValkeyHealth(IntegrationTestCase):
 			return LiveHealth(frappe.get_single("Valkey Server")).record()
 
 	def test_a_server_with_room_is_healthy(self) -> None:
+		# redis-py hands INFO back parsed, as a dict
 		self.assertEqual(
-			self.verdict(return_value=INFO.format(used=100 * 2**20, maximum=1024 * 2**20)).severity, HEALTHY
+			self.verdict(return_value={"used_memory": 100 * 2**20, "maxmemory": 1024 * 2**20}).severity,
+			HEALTHY,
 		)
 
 	def test_a_server_evicting_is_degraded(self) -> None:
-		finding = self.verdict(return_value=INFO.format(used=950 * 2**20, maximum=1024 * 2**20))
+		finding = self.verdict(return_value={"used_memory": 950 * 2**20, "maxmemory": 1024 * 2**20})
 		self.assertEqual(finding.severity, DEGRADED)
 		self.assertIn("950 of 1024 MB", finding.reason)
 

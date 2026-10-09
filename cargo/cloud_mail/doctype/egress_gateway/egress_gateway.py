@@ -194,6 +194,12 @@ class EgressGateway(WorkflowBuilder):
 		self.set_status("Provisioning")
 		self._provision.run_as_workflow()
 
+	def on_workflow_failure(self, workflow) -> None:
+		if self.status == "Provisioning":
+			self.set_status(
+				"Failed", _("Provisioning failed in {0}. See the workflow.").format(workflow.name)
+			)
+
 	@flow
 	def _provision(self) -> None:
 		if not self.install():

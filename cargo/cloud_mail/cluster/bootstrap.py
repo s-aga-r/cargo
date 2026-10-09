@@ -252,10 +252,10 @@ def report_cluster_status(cluster: Document, status: str, **values) -> None:
 			"error": None,
 			**values,
 		}  # serving arms the spawner's budget again
-	cluster.update({"status": status, **values})
-	cluster.save(ignore_permissions=True)
 	if not frappe.db.exists("Webhook", webhook_name_for(cluster.name)):
 		configure_mail_webhook(cluster)
+	cluster.update({"status": status, **values})
+	cluster.save(ignore_permissions=True)
 
 
 def _adopt_platform_domain(cluster: Document) -> None:
@@ -340,6 +340,27 @@ def finish_bootstrap(cluster: Document) -> bool:
 	)
 	activate_node(node)
 	return True
+
+
+def poll_pending() -> None:
+	"""Every minute: finish a bootstrap whose certificate or lease was not ready when the node
+	came up, and promote Provisioned nodes of Active clusters once their lease is active."""
+	for name in frappe.get_all("Stalwart Cluster", {"status": "Bootstrapping"}, pluck="name"):
+		try:
+			finish_bootstrap(frappe.get_doc("Stalwart Cluster", name))
+		except Exception:
+			log_exception(f"Could not finish bootstrapping {name}", frappe.get_doc("Stalwart Cluster", name))
+	active = frappe.get_all("Stalwart Cluster", {"status": "Active"}, pluck="name")
+	if not active:
+		return
+	for name in frappe.get_all(
+		"Stalwart Node", {"status": "Provisioned", "enabled": 1, "cluster": ("in", active)}, pluck="name"
+	):
+		node = frappe.get_doc("Stalwart Node", name)
+		try:
+			check_node(node)
+		except Exception:
+			log_exception(f"Could not check {name}", node)
 
 
 def ensure_api_key(target: Document, admin) -> None:

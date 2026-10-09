@@ -35,7 +35,10 @@ class IntegrationTestValkeyCredential(IntegrationTestCase):
 		password = credential.get_password("password")
 		self.assertEqual(
 			commands.call_args.args[1],
-			[("ACL", "SETUSER", "mail", "on", f">{password}", "~*", "&*", "+@all"), ("ACL", "SAVE")],
+			[
+				("ACL", "SETUSER", "mail", "on", "resetpass", f">{password}", "~*", "&*", "+@all"),
+				("ACL", "SAVE"),
+			],
 		)
 		connection = credential.connection()
 		self.assertEqual(connection["url"], f"redis://mail:{password}@[fdaa:1::30]:6379/0")

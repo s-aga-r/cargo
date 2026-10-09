@@ -281,11 +281,17 @@ class StalwartCluster(WorkflowBuilder):
 
 	@flow
 	def _upgrade_nodes(self) -> None:
-		for name in upgrade_order(self):
+		for name in self.plan_upgrade():
 			if not self.upgrade_node(name):
 				return
 			self.wait_until_serving(name)
 			self.soak(name)
+
+	@task
+	def plan_upgrade(self) -> list[str]:
+		"""The order, fixed once: the engine replays the flow after every task, and a node mid-upgrade
+		is not Active, so working it out afresh each time would skip it."""
+		return upgrade_order(self)
 
 	@task(queue="long", timeout=3 * (bootstrap.INSTALL_TIMEOUT + bootstrap.BOOTSTRAP_TIMEOUT))
 	def upgrade_node(self, name: str) -> bool:
