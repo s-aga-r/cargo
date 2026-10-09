@@ -5,9 +5,9 @@
 #
 # Runs on the Cargo host (or any bench with SITE) and asks public resolvers and the cluster's
 # own ports; nothing is changed. Phase 3 is the first real region; 6 adds several nodes and an
-# upgrade; 7 adds customer domains through grants. The two checks that need a human, one
-# external message arriving with spf, dkim and dmarc all passing and one plain site sending
-# from its platform address, are listed at the end rather than pretended.
+# upgrade; 7 adds customer domains through grants. The three checks that need a human, one
+# external message arriving with spf, dkim and dmarc all passing, an unknown local part being
+# rejected, and one plain site sending from its platform address, are listed at the end.
 set -uo pipefail
 
 CLUSTER="${1:?cluster name, e.g. mx.mail.blr.frappe.cloud}"

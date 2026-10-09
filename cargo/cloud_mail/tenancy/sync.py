@@ -125,7 +125,19 @@ def lock_site_accounts(site: str, locked: bool) -> None:
 	for cluster, ids in by_cluster.items():
 		client = get_client(frappe.get_cached_doc("Stalwart Cluster", cluster))
 		roles = roles_payload([disabled_role_id(client)] if locked else [])
-		client.accounts.update_many({account_id: {"roles": roles} for account_id in ids})
+		try:
+			client.accounts.update_many({account_id: {"roles": roles} for account_id in ids})
+		except StalwartRejectedError:
+			# One account whose principal is gone must not keep the rest unlocked: each on its own,
+			# the missing ones logged.
+			for account_id in ids:
+				try:
+					client.accounts.set_roles(account_id, [disabled_role_id(client)] if locked else [])
+				except StalwartRejectedError as error:
+					frappe.log_error(
+						title=f"Account {account_id} on {cluster} could not be {'locked' if locked else 'unlocked'}",
+						message=str(error),
+					)
 
 
 def disabled_permissions(doc: Document) -> list[str]:

@@ -15,7 +15,10 @@ STATE = {
 	"verified": "{{ 1 if doc.is_verified else 0 }}",
 	"holds_mailboxes": "{{ 1 if doc.holds_mailboxes else 0 }}",
 }
-CHANGED = 'doc.has_value_changed("enabled") or doc.has_value_changed("is_verified") or doc.has_value_changed("holds_mailboxes")'
+CHANGED = (
+	'doc.site and (doc.has_value_changed("enabled") or doc.has_value_changed("is_verified") '
+	'or doc.has_value_changed("holds_mailboxes"))'
+)
 WEBHOOKS = (
 	("mail_domain-registered", "after_insert", "doc.site", "registered"),
 	("mail_domain-changed", "on_update", CHANGED, "changed"),

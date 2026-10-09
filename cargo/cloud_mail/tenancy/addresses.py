@@ -76,13 +76,22 @@ def resolve_domain(site: str | None, email: str):
 	return domain
 
 
+def resolve_domain_name(site: str | None, domain_name: str):
+	"""`resolve_domain` for a bare domain name: the site's own, or one nobody owns."""
+	return resolve_domain(site, f"any@{(domain_name or '').strip().lower()}")
+
+
 def receiving_allowed(site: str | None, domain) -> bool:
 	"""Whether mail may land here: the site is entitled to mailboxes and this region holds the
 	domain's. Without a site only the domain decides."""
 
 	if not domain.holds_mailboxes:
 		return False
-	return not site or bool(frappe.get_cached_value("Mail Site", site, "mailboxes_allowed"))
+	if not site:
+		return True
+	# A domain nobody owns is shared: a site may send from it, never take mail at it, or one
+	# site's postmaster@ would be another's mailbox.
+	return bool(domain.site) and bool(frappe.get_cached_value("Mail Site", site, "mailboxes_allowed"))
 
 
 def assert_receiving_allowed(site: str | None, domain) -> None:

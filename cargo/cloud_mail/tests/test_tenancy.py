@@ -1060,12 +1060,69 @@ class TestEntitlement(TenancyTestCase):
 		domain.catch_all_address = "inbox@acme.com"
 		self.assertRaisesRegex(frappe.ValidationError, "Mailboxes are not available", domain.save)
 
+	def test_archiving_with_deletion_still_locks_and_disables_first(self) -> None:
+		self.make_domain()
+		account = self.make_account("inbox@acme.com")
+		with patch("cargo.cloud_mail.doctype.mail_site.mail_site.purge_directory") as purge:
+			self.site.retire(delete_data=True)
+		purge.assert_called_once()
+		self.assertTrue(
+			self.fake.get("Account", account.stalwart_id)["roles"]
+		)  # locked onto the disabled role
+		self.assertFalse(frappe.db.get_value("Mail Domain", "acme.com", "enabled"))
+
 	def test_a_domain_whose_mailboxes_live_elsewhere_relays(self) -> None:
 		domain = self.make_domain(holds_mailboxes=0)
 		self.assertTrue(domain.allow_relaying)
 		self.assertTrue(self.fake.find("Domain", name="acme.com")["allowRelaying"])
 		self.assertTrue(self.make_account("sender@acme.com").disable_receiving)
 		group = frappe.get_doc({"doctype": "Mail Group", "email": "team@acme.com", "site": self.site.name})
+		self.assertRaisesRegex(frappe.ValidationError, "Mailboxes are not available", group.insert)
+
+	def test_withdrawing_mailboxes_reaches_what_the_site_already_has(self) -> None:
+		domain = self.make_domain()
+		account = self.make_account("inbox@acme.com")
+		group = frappe.get_doc({"doctype": "Mail Group", "email": "team@acme.com", "site": self.site.name})
+		group.insert()
+		domain.catch_all_address = "inbox@acme.com"
+		domain.save()
+		self.assertFalse(account.disable_receiving or group.disable_receiving)
+
+		site = frappe.get_doc("Mail Site", self.site.name)
+		site.mailboxes_allowed = 0
+		site.save()
+		frappe.clear_document_cache("Mail Site", self.site.name)
+		self.assertTrue(frappe.db.get_value("Mail Account", account.name, "disable_receiving"))
+		self.assertTrue(frappe.db.get_value("Mail Group", group.name, "disable_receiving"))
+		self.assertIsNone(frappe.db.get_value("Mail Domain", domain.name, "catch_all_address"))
+		# Nor can the group be let back in through an update.
+		group.reload()
+		group.disable_receiving = 0
+		group.save()
+		self.assertTrue(group.disable_receiving)
+
+	def test_a_site_only_sends_from_a_domain_nobody_owns(self) -> None:
+		frappe.get_doc(
+			{
+				"doctype": "Mail Domain",
+				"domain_name": "common.example",
+				"is_verified": 1,
+				"holds_mailboxes": 1,
+			}
+		).insert()
+		self.addCleanup(
+			frappe.delete_doc,
+			"Mail Domain",
+			"common.example",
+			force=True,
+			ignore_permissions=True,
+			ignore_on_trash=True,
+		)
+		account = self.make_account("acme@common.example")
+		self.assertTrue(account.disable_receiving)
+		group = frappe.get_doc(
+			{"doctype": "Mail Group", "email": "postmaster@common.example", "site": self.site.name}
+		)
 		self.assertRaisesRegex(frappe.ValidationError, "Mailboxes are not available", group.insert)
 
 	def test_an_account_on_a_shared_domain_belongs_to_the_site_that_made_it(self) -> None:
@@ -1222,10 +1279,22 @@ class TestDomainEvents(TenancyTestCase):
 
 	def test_domains_nobody_owns_are_not_reported(self) -> None:
 		platform = frappe.get_doc(
-			{"doctype": "Mail Domain", "domain_name": "shared.example", "is_verified": 1}
+			{"doctype": "Mail Domain", "domain_name": "nobody.example", "is_verified": 1}
 		)
 		registered = frappe.get_doc("Webhook", "mail_domain-registered")
 		self.assertFalse(frappe.safe_eval(registered.condition, eval_locals={"doc": platform}))
+		platform.insert()
+		self.addCleanup(
+			frappe.delete_doc,
+			"Mail Domain",
+			"nobody.example",
+			force=True,
+			ignore_permissions=True,
+			ignore_on_trash=True,
+		)
+		platform.enabled = 0
+		changed = frappe.get_doc("Webhook", "mail_domain-changed")
+		self.assertFalse(frappe.safe_eval(changed.condition, eval_locals={"doc": platform}))
 
 
 class TestMailingList(TenancyTestCase):

@@ -15,6 +15,9 @@ frappe.ui.form.on('Stalwart Node', {
 			frm.add_custom_button(__('Restore'), () => frm.events.call(frm, 'restore', __('Adding to ingress DNS...')), __('Actions'))
 		}
 		frm.add_custom_button(__('Verify PTR'), () => frm.events.call(frm, 'verify_ptr', __('Resolving...')), __('Actions'))
+		if (frm.doc.machine && ['Pending', 'Failed', 'Disabled'].includes(frm.doc.status)) {
+			frm.add_custom_button(__('Release Machine'), () => frappe.confirm(__('Let this machine go? Atlas terminates it if it still runs; the node keeps its name and asks for another.'), () => frm.events.call(frm, 'release_machine', __('Releasing...'))), __('Actions'))
+		}
 	},
 
 	call(frm, method, freeze_message) {

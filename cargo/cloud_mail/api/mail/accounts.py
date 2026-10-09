@@ -20,6 +20,7 @@ from cargo.cloud_mail.doctype.mail_account.mail_account import (
 )
 from cargo.cloud_mail.tenancy import quotas as quota_rows
 from cargo.cloud_mail.tenancy import sync
+from cargo.cloud_mail.tenancy.addresses import resolve_domain_name
 from cargo.cloud_mail.tenancy.usage import used_disk_by_name
 
 ACCOUNT_PAGE_CAP = 200
@@ -31,7 +32,7 @@ ACCOUNT_PAGE_CAP = 200
 def list_accounts(
 	domain: str | None = None, search: str | None = None, start: int = 0, limit: int = 50
 ) -> dict:
-	filters = {"domain": owned("Mail Domain", domain).name} if domain else None
+	filters = {"domain": resolve_domain_name(current_site().name, domain).name} if domain else None
 	names, total = owned_page(
 		"Mail Account", search, start, limit, ACCOUNT_PAGE_CAP, ("name", "display_name"), filters
 	)

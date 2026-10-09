@@ -12,6 +12,7 @@ from cargo.cloud_mail.tenancy.addresses import (
 	assert_address_available,
 	assert_domain_live,
 	assert_receiving_allowed,
+	receiving_allowed,
 	resolve_domain,
 	validate_email_address,
 )
@@ -59,6 +60,8 @@ class MailGroup(QuotaHolder, Document):
 		if self.is_new() and not self.flags.adopting:
 			assert_domain_live(domain)
 			assert_receiving_allowed(self.site, domain)
+		if not receiving_allowed(self.site, domain):
+			self.disable_receiving = 1  # an entitlement withdrawn reaches a group on its next save
 		site = frappe.get_cached_doc("Mail Site", self.site)
 		if self.is_new() and not self.flags.adopting:
 			site.assert_can_add_group()

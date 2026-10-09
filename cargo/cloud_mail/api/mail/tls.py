@@ -8,6 +8,7 @@ from frappe.utils import cint, get_datetime
 from cargo.cloud_mail.api.site import current_site, owned, owned_page, site_api
 from cargo.cloud_mail.doctype.tls_report.tls_report import report_payloads
 from cargo.cloud_mail.reports import report_window
+from cargo.cloud_mail.tenancy.addresses import resolve_domain_name
 from cargo.cloud_mail.utils import utc_iso
 
 REPORT_PAGE_CAP = 500  # the dashboard offers pages of up to 500; a listing row carries no policies
@@ -37,7 +38,7 @@ def list_tls_reports(
 
 	filters: dict = {"total_sessions": [">", 0]}
 	if domain:
-		filters["policy_domain"] = owned("Mail Domain", domain).name
+		filters["policy_domain"] = resolve_domain_name(current_site().name, domain).name
 	if since_days := report_window(days)[0]:
 		filters["date_range_end"] = [">=", since_days]
 	if since:
@@ -75,7 +76,9 @@ def get_tls_summary(domain: str | None = None, days: int = 30) -> dict:
 	reporter, and the failed sessions by result type; ``days`` of 0 counts everything still held."""
 
 	since, until = report_window(days)
-	scope = ReportScope(current_site().name, owned("Mail Domain", domain).name if domain else None, since)
+	scope = ReportScope(
+		current_site().name, resolve_domain_name(current_site().name, domain).name if domain else None, since
+	)
 	return {
 		"since": utc_iso(since) if since else None,
 		"until": utc_iso(until),

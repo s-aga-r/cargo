@@ -45,7 +45,7 @@ Every minute Cargo connects as its role and reads the connection count against `
 
 Every night the server dumps each Postgres Database with `pg_dump` and puts it in a `postgres-backups` bucket on the region's Active Object Storage Cluster, under `<database>/<timestamp>.sql.gz`, signed with curl's own SigV4. Dumps older than thirty days are deleted from Cargo. The bucket is made the first night the region's storage serves; until then nothing is dumped.
 
-`cargo/postgres/conf/postgres/restore.sh` brings one database back from a dump: it creates the database if it is missing, with its owner, and feeds the dump to `psql`. It is run over SSH by hand, with the same S3 variables the dump used plus `DATABASE`, `OWNER` and `OBJECT_KEY`. A restore drill in a real region is owed before mail depends on the server.
+`cargo/postgres/conf/postgres/restore.sh` brings one database back from a dump: it ends the database's connections, drops whatever is there, creates it afresh with its owner, and feeds the dump to `psql`. It replaces, never merges. It is run over SSH by hand, with the same S3 variables the dump used plus `DATABASE`, `OWNER` and `OBJECT_KEY`. A restore drill in a real region is owed before mail depends on the server.
 
 ## What it does not do
 

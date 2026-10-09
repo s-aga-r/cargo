@@ -14,6 +14,7 @@ from cargo.cloud_mail.cluster.firewall import gateway_firewall
 from cargo.cloud_mail.doctype.stalwart_node.stalwart_node import validate_ip
 from cargo.cloud_mail.stalwart import get_admin_client, get_client
 from cargo.cloud_mail.utils import dkim_algorithms, log_exception, validate_version
+from cargo.service import release_machine
 from cargo.workflow_engine.doctype.press_workflow.decorators import flow, task
 from cargo.workflow_engine.doctype.press_workflow.workflow_builder import WorkflowBuilder
 
@@ -160,6 +161,14 @@ class EgressGateway(WorkflowBuilder):
 		)
 		self.db_set("machine", machine.name, update_modified=False)
 		return machine.name
+
+	@frappe.whitelist()
+	def release_machine(self) -> None:
+		frappe.only_for("System Manager")
+		release_machine(self, ("Pending", "Failed", "Disabled"), ipv4_address=None)
+		self.reload()
+		dns.sync_gateway_records(self)
+		self.set_status("Pending", "")
 
 	def sync_machines(self) -> None:
 		"""What this gateway's machine settling means for it."""

@@ -46,7 +46,7 @@ Every five minutes each serving node's Prometheus metrics are relayed to datum u
 
 **A node is Failed.** Its Setup Log holds every line the scripts printed, secrets masked. Fix what it says and run Provision again; the machine is kept. With auto spawn on, Cargo tries three times by itself.
 
-**A node's machine died.** Health marks it; release the Machine, request a new one on the same node record, and provision. The hostname and its DNS names stay.
+**A node's machine died.** Health fails the node and takes it out of ingress and SPF. On the node, Release Machine lets the machine go (Atlas terminates it if it still runs), then Request Machine asks for another on the same record and provisioning starts when it runs. The hostname and its number stay; the address and lease are new. The Postgres, Valkey and SFU servers have the same two buttons.
 
 **Upgrading.** Set the cluster's `stalwart_version`, then Upgrade Nodes on the cluster: each Active node in turn, the bootstrap node last, is drained, gets the new binary beside the old, restarts, rejoins ingress once its lease is active, and soaks for `soak_minutes` with the cluster Healthy before the next is touched. A failure stops the flow with that node out of ingress and its log on the record. A single node can be upgraded or rolled back on its own; rollback flips the symlink back. Read the release notes about mixed versions first.
 

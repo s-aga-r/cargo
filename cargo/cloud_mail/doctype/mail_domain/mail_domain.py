@@ -28,6 +28,7 @@ from cargo.cloud_mail.utils import dkim_algorithms, log_exception, utc_iso
 from cargo.dns.resolver import verify_dns_record
 
 # A change to any of these reaches the cluster; is_verified is set by hand only by managers.
+SERVICES = {"Mail Account": "accounts", "Mail Group": "groups", "Mailing List": "mailing_lists"}
 PUSHED_FIELDS = (
 	"description",
 	"catch_all_address",
@@ -99,8 +100,9 @@ class MailDomain(Document):
 				# whether another site already holds it.
 				if ownership.required():
 					ownership.assert_ownership(site, self.domain_name)
-				assert_domain_available(self.domain_name, self.site)
+				# The limit before the availability check, which may purge an archived site's copy.
 				site.assert_can_add_domain()
+				assert_domain_available(self.domain_name, self.site)
 		if not self.holds_mailboxes:
 			# Mail for the domain belongs where its mailboxes are, so what lands here is passed on.
 			self.allow_relaying = 1
@@ -548,7 +550,28 @@ def purge_domain(name: str) -> None:
 	for doctype in ("Mail Account", "Mail Group", "Mailing List"):
 		for doc_name in frappe.get_all(doctype, {"domain": name}, pluck="name"):
 			frappe.delete_doc(doctype, doc_name, ignore_permissions=True)
+	drop_aliases_on(name)
 	frappe.delete_doc("Mail Domain", name, ignore_permissions=True)
+
+
+def drop_aliases_on(domain_name: str) -> None:
+	"""Aliases other objects hold on this domain, which would otherwise keep it from going.
+	The holder is told, best effort: it belongs to an archived site and is locked anyway."""
+	holders = frappe.get_all(
+		"Mail Address Alias",
+		{"alias_email": ("like", f"%@{domain_name}"), "parenttype": ("in", list(SERVICES))},
+		["parent", "parenttype"],
+		distinct=True,
+	)
+	frappe.db.delete("Mail Address Alias", {"alias_email": ("like", f"%@{domain_name}")})
+	for holder in holders:
+		if not frappe.db.exists(holder.parenttype, holder.parent):
+			continue
+		doc = frappe.get_doc(holder.parenttype, holder.parent)
+		try:
+			sync.push_update(doc, SERVICES[holder.parenttype], {"aliases": sync.aliases_payload(doc)})
+		except Exception:
+			log_exception(f"Could not drop the aliases of {doc.name} on {domain_name}", doc)
 
 
 def reverify_ownership() -> None:

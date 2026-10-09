@@ -15,6 +15,7 @@ from cargo.cloud_mail.cluster import bootstrap, dns, naming
 from cargo.cloud_mail.cluster.firewall import node_firewall
 from cargo.cloud_mail.utils import log_exception
 from cargo.dns.resolver import verify_ptr_record
+from cargo.service import release_machine
 from cargo.workflow_engine.doctype.press_workflow.decorators import flow, task
 from cargo.workflow_engine.doctype.press_workflow.workflow_builder import WorkflowBuilder
 
@@ -157,6 +158,21 @@ class StalwartNode(WorkflowBuilder):
 		)
 		self.db_set("machine", machine.name, update_modified=False)
 		return machine.name
+
+	@frappe.whitelist()
+	def release_machine(self) -> None:
+		"""Let the machine go and start over on the same record: the hostname and its number
+		stay, the address and lease do not. For a node that died or was drained and disabled."""
+		frappe.only_for("System Manager")
+		release_machine(self, REMOVABLE_STATUSES, ipv4_address=None, node_id=0)
+		self.reload()
+		dns.sync_node_records(self, include_ingress=False)
+		dns.sync_spf_record(self.get_cluster())
+		bootstrap.forget_node(self)
+		self.db_set(
+			{"consecutive_failures": 0, "consecutive_successes": 0, "drained_by": None}, update_modified=False
+		)
+		self.set_status("Pending", "")
 
 	def sync_machines(self) -> None:
 		"""What this node's machine settling means for it. Its state is already recorded;

@@ -95,6 +95,8 @@ class MailSite(Document):
 
 	def on_update(self) -> None:
 		before = self.get_doc_before_save()
+		if before and before.mailboxes_allowed and not self.mailboxes_allowed:
+			self.withdraw_mailboxes()
 		if before and before.egress_pool != self.egress_pool:
 			from cargo.cloud_mail.cluster import egress
 
@@ -156,10 +158,12 @@ class MailSite(Document):
 		object is removed from Stalwart at once instead."""
 
 		self.db_set({"enabled": 0, "status": "Archived", "archived_at": now()})
+		# Locked and disabled first either way: with delete_data the purge runs later, one object a
+		# transaction, and mail must not flow in the meantime.
+		sync.lock_site_accounts(self.name, locked=True)
+		self.disable_domains(_("The site was archived."))
+		self.db_set("domain_verification_token", frappe.generate_hash(length=32))
 		if not delete_data:
-			sync.lock_site_accounts(self.name, locked=True)
-			self.disable_domains(_("The site was archived."))
-			self.db_set("domain_verification_token", frappe.generate_hash(length=32))
 			return
 		if frappe.flags.do_not_enqueue:
 			purge_directory(self.name)
@@ -173,12 +177,33 @@ class MailSite(Document):
 				enqueue_after_commit=True,
 			)
 
-	def disable_domains(self, reason: str) -> None:
-		for name in frappe.get_all("Mail Domain", {"site": self.name, "enabled": 1}, pluck="name"):
+	def withdraw_mailboxes(self) -> None:
+		"""An entitlement taken away reaches what the site already has: every account and group
+		stops receiving, every catch-all goes. Lists are left to be deleted by their owner."""
+		for doctype in ("Mail Account", "Mail Group"):
+			for name in frappe.get_all(doctype, {"site": self.name, "disable_receiving": 0}, pluck="name"):
+				doc = frappe.get_doc(doctype, name)
+				doc.disable_receiving = 1
+				doc.save(ignore_permissions=True)
+		for name in frappe.get_all(
+			"Mail Domain", {"site": self.name, "catch_all_address": ("is", "set")}, pluck="name"
+		):
 			domain = frappe.get_doc("Mail Domain", name)
-			domain.enabled = 0
-			domain.disabled_reason = reason
+			domain.catch_all_address = None
+			domain.sub_addressing = 0
 			domain.save(ignore_permissions=True)
+
+	def disable_domains(self, reason: str) -> None:
+		"""Every domain of the site, the hold counted from now: one disabled months ago would
+		otherwise be purged the day after the archive."""
+		for name in frappe.get_all("Mail Domain", {"site": self.name}, pluck="name"):
+			domain = frappe.get_doc("Mail Domain", name)
+			if domain.enabled:
+				domain.enabled = 0
+				domain.disabled_reason = reason
+				domain.save(ignore_permissions=True)
+			else:
+				domain.db_set("disabled_at", now(), update_modified=False)
 
 	# --- limits -----------------------------------------------------------------
 
@@ -196,17 +221,25 @@ class MailSite(Document):
 			frappe.throw(_("Default Disk Quota cannot exceed the site's Total Disk Quota."))
 
 	def domain_count(self) -> int:
-		return frappe.db.count("Mail Domain", {"site": self.name})
+		return self.locked_count("Mail Domain")
 
 	def account_count(self) -> int:
 		"""The platform address is the site's but not of its making, so it is not counted."""
-		return frappe.db.count("Mail Account", {"site": self.name, "is_platform_address": 0})
+		return self.locked_count("Mail Account", "and is_platform_address = 0")
 
 	def group_count(self) -> int:
-		return frappe.db.count("Mail Group", {"site": self.name})
+		return self.locked_count("Mail Group")
 
 	def mailing_list_count(self) -> int:
-		return frappe.db.count("Mailing List", {"site": self.name})
+		return self.locked_count("Mailing List")
+
+	def locked_count(self, doctype: str, extra: str = "") -> int:
+		"""A locking read: under REPEATABLE READ a plain count sees the snapshot from before the
+		site lock was taken, so two requests could both find room for the last slot."""
+		rows = frappe.db.sql(
+			f"select count(*) from `tab{doctype}` where site = %s {extra} for update", (self.name,)
+		)
+		return cint(rows[0][0]) if rows else 0
 
 	def assert_can_add_domain(self) -> None:
 		self.lock()
@@ -240,6 +273,7 @@ class MailSite(Document):
 			)
 			if doctype == "Mail Account":
 				query = query.where(holder.is_platform_address == 0)
+			query = query.for_update()
 			if exclude and exclude[0] == doctype:
 				query = query.where(holder.name != exclude[1])
 			total += cint(query.run()[0][0])
