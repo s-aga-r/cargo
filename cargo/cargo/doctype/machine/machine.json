@@ -22,7 +22,8 @@
   "error",
   "section_break_ssh",
   "ssh_public_key",
-  "ssh_private_key"
+  "ssh_private_key",
+  "ssh_host_key"
  ],
  "fields": [
   {
@@ -154,12 +155,19 @@
    "fieldtype": "Password",
    "label": "SSH Private Key",
    "read_only": 1
+  },
+  {
+   "description": "What the machine answered with on first contact. Every later connection must match it.",
+   "fieldname": "ssh_host_key",
+   "fieldtype": "Small Text",
+   "label": "SSH Host Key",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-04 14:15:20.778239",
+ "modified": "2026-10-09 12:00:14.485714",
  "modified_by": "Administrator",
  "module": "Cargo",
  "name": "Machine",

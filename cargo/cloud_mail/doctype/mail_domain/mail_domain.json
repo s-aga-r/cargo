@@ -28,7 +28,6 @@
   "verification_skipped",
   "last_verified_at",
   "ownership_misses",
-  "ownership_misses",
   "column_break_dns",
   "last_refreshed_at",
   "dns_records_section",
@@ -201,13 +200,6 @@
    "read_only": 1
   },
   {
-   "description": "Daily checks in a row that found the ownership record gone.",
-   "fieldname": "ownership_misses",
-   "fieldtype": "Int",
-   "label": "Ownership Misses",
-   "read_only": 1
-  },
-  {
    "fieldname": "column_break_dns",
    "fieldtype": "Column Break"
   },
@@ -313,7 +305,7 @@
    "link_fieldname": "policy_domain"
   }
  ],
- "modified": "2026-09-30 16:43:06.381861",
+ "modified": "2026-10-09 12:00:56.756174",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Mail Domain",

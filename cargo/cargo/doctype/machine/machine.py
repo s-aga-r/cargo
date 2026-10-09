@@ -12,7 +12,7 @@ from frappe.utils import now_datetime
 
 from cargo.atlas_client import DEAD_STATES, MIB_PER_GB, RUNNING_STATE, AtlasNotFound
 from cargo.client_models import NodeSpec
-from cargo.ssh import create_keypair
+from cargo.ssh import HostKeyPin, create_keypair
 
 if TYPE_CHECKING:
 	from cargo.atlas_client import AtlasClient
@@ -41,6 +41,7 @@ class Machine(Document):
 		reference_doctype: DF.Link
 		reference_name: DF.DynamicLink
 		role: DF.Data
+		ssh_host_key: DF.SmallText | None
 		ssh_private_key: DF.Password | None
 		ssh_public_key: DF.SmallText | None
 		status: DF.Literal["Draft", "Pending", "Running", "Broken", "Terminated"]
@@ -176,6 +177,13 @@ class Machine(Document):
 			return self.record("Broken", error="Atlas reported no mesh address")
 
 		return self.record("Running")
+
+	def host_key_pin(self) -> HostKeyPin:
+		"""How this machine is recognised over SSH: the key it first answered with, pinned."""
+		return HostKeyPin(self.ssh_host_key, self.pin_host_key)
+
+	def pin_host_key(self, line: str) -> None:
+		self.db_set("ssh_host_key", line, update_modified=False)
 
 	def record(self, status: MachineStatus, error: str | None = None) -> MachineStatus:
 		self.status = status

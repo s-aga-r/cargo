@@ -281,7 +281,7 @@ class PilotImage(WorkflowBuilder):
 		machine: MachineDoc = self.build_machine
 		private_key = machine.get_password("ssh_private_key")
 		builder = Builder()
-		builder.wait_until_reachable(machine.address, private_key)
+		builder.wait_until_reachable(machine.address, private_key, machine.host_key_pin())
 
 		# Creating site is handled by the PilotImage doctype itself if required.
 		with OutputLog(self, "build_log") as log:
@@ -290,6 +290,7 @@ class PilotImage(WorkflowBuilder):
 				private_key,
 				self.get_provision_environment(),
 				on_output=log.write,
+				pin=machine.host_key_pin(),
 			)
 
 	def get_required_apps(self) -> list[dict]:

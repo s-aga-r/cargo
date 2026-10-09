@@ -14,7 +14,7 @@ from cargo.atlas_client import host_port
 from cargo.client_models import GATEWAY, STORAGE
 from cargo.object_storage.client import Client, Error
 from cargo.service import TRUSTED_PROXIES, wildcard_domain
-from cargo.ssh import run_over_ssh, script
+from cargo.ssh import HostKeyPin, run_over_ssh, script
 
 BINARY_URL = "https://garagehq.deuxfleurs.fr/_releases/{version}/{arch}/garage"
 CONF = ("object_storage", "conf", "garage")
@@ -36,6 +36,7 @@ class MachineRow(TypedDict):
 	zone: str
 	address: str
 	disk_size_gb: int
+	ssh_host_key: str | None
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,7 @@ class Setup(Client):
 				"reference_name": self.cluster.name,
 				"status": "Running",
 			},
-			fields=["name", "role", "zone", "address", "disk_size_gb"],
+			fields=["name", "role", "zone", "address", "disk_size_gb", "ssh_host_key"],
 			order_by="creation",
 		)
 
@@ -72,7 +73,17 @@ class Setup(Client):
 
 	def run(self, machine: MachineRow, script: str, on_output: Callable[[str], None] | None = None) -> str:
 		"""Every command a node is given, streamed to `on_output` as it arrives."""
-		return run_over_ssh(machine["address"], script, self.key_for(machine), on_output=on_output)
+		return run_over_ssh(
+			machine["address"], script, self.key_for(machine), on_output=on_output, pin=self.pin_for(machine)
+		)
+
+	def pin_for(self, machine: MachineRow) -> HostKeyPin:
+		return HostKeyPin(
+			machine.get("ssh_host_key"),
+			lambda line: frappe.db.set_value(
+				"Machine", machine["name"], "ssh_host_key", line, update_modified=False
+			),
+		)
 
 	def layout_version(self) -> int:
 		"""The applied layout version, zero if none. Staged changes are a separate field."""

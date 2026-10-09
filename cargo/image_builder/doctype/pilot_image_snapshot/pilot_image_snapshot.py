@@ -59,19 +59,20 @@ class PilotImageSnapshot(Document):
 
 		builder = Builder()
 		private_key = machine.get_password("ssh_private_key")
+		pin = machine.host_key_pin()
 		required = [row.app for row in self.required_apps]
 
 		if self.supports_app_toggle:
 			# Install all apps on site (if not already installed) and disable all apps except the required_apps
 			installed = [row.app for row in image.get_required_apps()]
 			others = [app for app in installed if app not in required]
-			builder.change_site_apps(machine.address, private_key, "install", installed)
+			builder.change_site_apps(machine.address, private_key, "install", installed, pin=pin)
 			if others:
-				builder.change_site_apps(machine.address, private_key, "disable", others)
+				builder.change_site_apps(machine.address, private_key, "disable", others, pin=pin)
 		else:
 			# Install the signup app and what it requires on site and ensure nothing else is installed.
-			builder.change_site_apps(machine.address, private_key, "install", required)
-			builder.change_site_apps(machine.address, private_key, "verify", ["frappe", *required])
+			builder.change_site_apps(machine.address, private_key, "install", required, pin=pin)
+			builder.change_site_apps(machine.address, private_key, "verify", ["frappe", *required], pin=pin)
 
 	def run_app_post_requisite(self, machine: MachineDoc, image: "PilotImage") -> None:
 		"""Take this snapshot's apps back off the site, so the next snapshot starts from a bare site."""
@@ -80,11 +81,12 @@ class PilotImageSnapshot(Document):
 
 		builder = Builder()
 		private_key = machine.get_password("ssh_private_key")
+		pin = machine.host_key_pin()
 		required = [row.app for row in self.required_apps]
 
 		if self.supports_app_toggle:
 			# Only this snapshot's apps are enabled, so disabling them disables all the apps on the site.
-			builder.change_site_apps(machine.address, private_key, "disable", required)
+			builder.change_site_apps(machine.address, private_key, "disable", required, pin=pin)
 		else:
 			# Uninstall the signup app and what it requires from site and ensure nothing else is installed.
 			builder.change_site_apps(machine.address, private_key, "uninstall", required)

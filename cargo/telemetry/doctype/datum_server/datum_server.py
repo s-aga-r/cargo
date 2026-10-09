@@ -176,6 +176,7 @@ class DatumServer(WorkflowBuilder):
 					machine.get_password("ssh_private_key"),
 					timeout=SETUP_TIMEOUT,
 					on_output=log.write,
+					pin=machine.host_key_pin(),
 				)
 			except Exception:
 				frappe.log_error(
@@ -201,6 +202,7 @@ class DatumServer(WorkflowBuilder):
 					machine.get_password("ssh_private_key"),
 					timeout=SETUP_TIMEOUT,
 					on_output=log.write,
+					pin=machine.host_key_pin(),
 				)
 			except Exception:
 				frappe.log_error(

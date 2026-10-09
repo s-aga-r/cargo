@@ -1,10 +1,12 @@
+import io
+from pathlib import Path
 from unittest.mock import patch
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from cargo.image_builder.doctype.pilot_image.pilot_image import PilotImage
-from cargo.ssh import OutputLog, live_output
+from cargo.ssh import HostKeyPin, OutputLog, live_output, run_over_ssh
 
 
 class TestOutputLog(IntegrationTestCase):
@@ -47,3 +49,62 @@ class TestOutputLog(IntegrationTestCase):
 			pass
 
 		self.assertEqual(frappe.db.get_value("Pilot Image", image.name, "build_log"), "")
+
+
+PRESENTED = "fdaa:1::9 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPresentedByTheMachine"
+
+
+class FakeSsh:
+	"""Stands in for the ssh binary: notes the options it was given and writes the host key it
+	"saw" into the known-hosts file, as ssh does on first contact."""
+
+	def __init__(self, args, **kwargs) -> None:
+		self.args = args
+		self.stdin = io.StringIO()
+		self.stdout = iter(["ok\n"])
+		self.returncode = 0
+		hosts = next(a for a in args if a.startswith("UserKnownHostsFile=")).split("=", 1)[1]
+		with Path(hosts).open("a") as known:
+			known.write(f"{PRESENTED}\n")
+
+	def wait(self) -> None:
+		pass
+
+	def kill(self) -> None:
+		pass
+
+	def option(self, name: str) -> str:
+		return next(a for a in self.args if a.startswith(f"{name}=")).split("=", 1)[1]
+
+
+class UnitTestHostKeyPinning(UnitTestCase):
+	"""A machine is recognised by the key it first answered with."""
+
+	def run_ssh(self, pin: HostKeyPin | None) -> FakeSsh:
+		seen = []
+		with patch(
+			"cargo.ssh.subprocess.Popen",
+			side_effect=lambda *a, **k: seen.append(FakeSsh(*a, **k)) or seen[-1],
+		):
+			run_over_ssh("fdaa:1::9", "uptime", "a-key", pin=pin)
+		return seen[0]
+
+	def test_first_contact_records_the_key_the_machine_presented(self):
+		recorded = []
+		ssh = self.run_ssh(HostKeyPin(None, recorded.append))
+
+		self.assertEqual(ssh.option("StrictHostKeyChecking"), "accept-new")
+		self.assertEqual(recorded, [PRESENTED])
+
+	def test_a_pinned_key_is_the_only_one_accepted(self):
+		recorded = []
+		ssh = self.run_ssh(HostKeyPin(PRESENTED, recorded.append))
+
+		self.assertEqual(ssh.option("StrictHostKeyChecking"), "yes")
+		self.assertEqual(recorded, [])  # already known; nothing to record
+
+	def test_without_a_pin_nothing_is_kept(self):
+		ssh = self.run_ssh(None)
+
+		self.assertEqual(ssh.option("StrictHostKeyChecking"), "accept-new")
+		self.assertFalse(Path(ssh.option("UserKnownHostsFile")).exists())

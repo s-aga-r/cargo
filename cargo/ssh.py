@@ -7,6 +7,7 @@ import threading
 import time
 import typing
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import frappe
@@ -15,6 +16,18 @@ from frappe import _
 if typing.TYPE_CHECKING:
 	from frappe.model.document import Document
 
+
+@dataclass(frozen=True)
+class HostKeyPin:
+	"""The host key a machine answered with the first time, and how to remember it.
+
+	With `known` set the connection fails unless the machine presents that key; without it
+	the key presented is accepted and handed to `record`, which is the one chance to pin it."""
+
+	known: str | None
+	record: Callable[[str], None]
+
+
 SSH_TIMEOUT = 600
 LOG_FLUSH_SECONDS = 3  # how often a running command's output is published
 LOG_CACHE_TTL = 15 * 60
@@ -22,10 +35,6 @@ ERROR_TAIL = 3000  # characters of output kept when a command fails
 OPTIONS = (
 	"-o",
 	"IdentitiesOnly=yes",
-	"-o",
-	"StrictHostKeyChecking=accept-new",
-	"-o",
-	"UserKnownHostsFile=/dev/null",
 	"-o",
 	"ConnectTimeout=15",
 	"-o",
@@ -158,8 +167,12 @@ def run_over_ssh(
 	user: str = "root",
 	timeout: int = SSH_TIMEOUT,
 	on_output: Callable[[str], None] | None = None,
+	pin: HostKeyPin | None = None,
 ) -> str:
-	"""Pipe a script to ``bash -s`` and return what it printed, line by line as it arrives."""
+	"""Pipe a script to ``bash -s`` and return what it printed, line by line as it arrives.
+
+	Without a `pin` the host key is taken on trust every time, which is only for a machine
+	nobody keeps a record of."""
 	if not key:
 		frappe.throw(_("No SSH private key, so {0} cannot be reached.").format(address))
 
@@ -167,9 +180,25 @@ def run_over_ssh(
 		key_file.write(key if key.endswith("\n") else f"{key}\n")
 		path = key_file.name
 	os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+	with tempfile.NamedTemporaryFile("w", delete=False) as hosts_file:
+		if pin and pin.known:
+			hosts_file.write(f"{pin.known}\n")
+		hosts_path = hosts_file.name
+	checking = "yes" if pin and pin.known else "accept-new"
 
 	process = subprocess.Popen(
-		["ssh", "-i", path, *OPTIONS, f"{user}@{address}", "bash -s"],
+		[
+			"ssh",
+			"-i",
+			path,
+			*OPTIONS,
+			"-o",
+			f"UserKnownHostsFile={hosts_path}",
+			"-o",
+			f"StrictHostKeyChecking={checking}",
+			f"{user}@{address}",
+			"bash -s",
+		],
 		stdin=subprocess.PIPE,
 		stdout=subprocess.PIPE,
 		stderr=subprocess.STDOUT,
@@ -192,6 +221,9 @@ def run_over_ssh(
 	finally:
 		watchdog.cancel()
 		os.unlink(path)
+		if pin and not pin.known and (presented := Path(hosts_path).read_text().strip()):
+			pin.record(presented)
+		os.unlink(hosts_path)
 
 	output = "".join(lines)
 	if process.returncode != 0:
