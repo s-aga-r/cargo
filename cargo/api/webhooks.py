@@ -10,7 +10,7 @@ SETTINGS = "Cargo Settings"
 
 # nosemgrep: guest-whitelisted-method -- verify_token authenticates the caller below.
 @frappe.whitelist(allow_guest=True, methods=["POST"])
-@verify_token
+@verify_token("bucket:*")
 def configure(request_url: str, webhook_secret: str, enabled: bool = True) -> dict:
 	"""Point every Cargo delivery at one Central receiver.
 

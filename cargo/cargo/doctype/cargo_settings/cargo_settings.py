@@ -26,6 +26,7 @@ class CargoSettings(Document):
 		central_webhook_enabled: DF.Check
 		central_webhook_secret: DF.Password
 		central_webhook_url: DF.Data | None
+		dns_zone: DF.Link | None
 		jwks_url: DF.Data
 		max_auto_retry_count: DF.Int
 		proxy_token: DF.Password

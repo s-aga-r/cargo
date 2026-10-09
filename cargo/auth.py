@@ -16,34 +16,74 @@ if typing.TYPE_CHECKING:
 TOKEN_HEADER = "X-Cargo-Access-Token"
 CENTRAL_ISSUER = "central"
 ALGORITHM = "EdDSA"
+SITE_CLAIM = "site"
+# The scope a site's own token carries; the wide ones are never a site's. Of those, only
+# `bucket:*` may come from Atlas: everything about mail and the SFU is Central's to say.
+SITE_SCOPE = "mail"
+WIDE_SCOPES = frozenset({"mail:*", "bucket:*", "sfu:*"})
+CENTRAL_ONLY_SCOPES = frozenset({"sfu:*"})
 
 jwks_clients: dict[str, PyJWKClient] = {}
 
 
-def verify_token(func: Callable) -> Callable:
-	"""Authenticate the caller before the handler runs, leaving its claims on
-	`frappe.local.request_claims`. functools.wraps is required — Frappe maps request
-	arguments off the wrapped signature."""
+def verify_token(*scopes: str) -> Callable:
+	"""Authenticate the caller and require one of `scopes` before the handler runs, leaving the
+	claims on `frappe.local.request_claims`. Every guest endpoint names what it accepts: a
+	token for this audience is not a token for everything. functools.wraps is required — Frappe
+	maps request arguments off the wrapped signature."""
+	if not scopes or not all(isinstance(scope, str) for scope in scopes):
+		raise TypeError("verify_token takes the scopes the endpoint accepts.")
 
-	@functools.wraps(func)
-	def wrapper(*args, **kwargs):
-		frappe.local.request_claims = authenticate_request()
-		return func(*args, **kwargs)
+	def decorator(func: Callable) -> Callable:
+		@functools.wraps(func)
+		def wrapper(*args, **kwargs):
+			frappe.local.request_claims = authenticate_request(scopes)
+			return func(*args, **kwargs)
 
-	return wrapper
+		return wrapper
+
+	return decorator
 
 
-def authenticate_request() -> frappe._dict:
-	"""The claims of the token on this request, or an authentication error."""
+def authenticate_request(scopes: tuple[str, ...]) -> frappe._dict:
+	"""The claims of the token on this request, once it verifies, says nothing its signer may
+	not say, and covers one of `scopes`. An unverifiable token is 401; one that verifies but
+	does not cover the call is 403."""
 	token = presented_token()
 	if not token:
 		frappe.throw(_("An access token is required."), frappe.AuthenticationError)
 
 	claims = token_claims(token)
-	if claims is None:
+	if claims is None or not token_is_coherent(claims):
 		frappe.throw(_("This access token is not one Cargo accepts."), frappe.AuthenticationError)
 
+	if not token_scopes(claims) & set(scopes):
+		frappe.throw(_("This access token does not cover this call."), frappe.PermissionError)
+
 	return frappe._dict(claims)
+
+
+def token_scopes(claims: dict[str, Any]) -> set[str]:
+	"""`scope` is a space-separated set, matched as exact strings: `*` names nothing."""
+	return set((claims.get("scope") or "").split())
+
+
+def token_is_coherent(claims: dict[str, Any]) -> bool:
+	"""Who signed a token limits what it may say. Only Central names a site or hands out a mail
+	or SFU scope; a site's token is bound to that site and never carries a wider power; a site scope
+	without a site binds to nothing."""
+	scopes = token_scopes(claims)
+	site = claims.get(SITE_CLAIM)
+	central_only = {
+		scope
+		for scope in scopes
+		if scope == SITE_SCOPE or scope.startswith("mail:") or scope in CENTRAL_ONLY_SCOPES
+	}
+	if (site or central_only) and claims.get("iss") != CENTRAL_ISSUER:
+		return False
+	if site and scopes & WIDE_SCOPES:
+		return False
+	return not (SITE_SCOPE in scopes and not site)
 
 
 def presented_token() -> str:

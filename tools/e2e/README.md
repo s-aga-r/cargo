@@ -49,3 +49,25 @@ docker exec -it -u frappe cargo-e2e bash -lc "pilot -b cargo status"
 
 Nothing here talks to a real Central or Atlas. The URLs point at stubs, which is enough
 to prove the install: Cargo makes no outbound call while installing.
+
+## The mail cluster on fake_atlas
+
+`tools/e2e/mail.sh` takes one single-node Stalwart cluster through Cargo's real flows,
+with fake_atlas standing in for Atlas: the node asks for a machine with a public address,
+`sync_pending_machines` starts provisioning when it runs, `install.sh` and `bootstrap.sh`
+run over SSH, and the cluster goes Active once the lease is read back. It then checks the
+node (no recovery variables left, no plan files, exactly one marker, a clean registry
+journal), checks what Cargo sees (drift empty, the disabled-accounts role, health Healthy),
+and provisions the node again to prove `configure.sh` on a live node changes nothing.
+
+```bash
+python3 tools/fake_atlas/fake_atlas.py --port 8100 --systemd     # elsewhere
+SITE=cargo.localhost tools/e2e/mail.sh
+```
+
+Unlike `run.sh` this drives an existing development bench, and `bench start` must be
+running: the workflow engine and the machine sync live on the scheduler and workers. The
+cluster hostname must resolve to 127.0.0.1, where fake_atlas publishes the node's port 443;
+the script prints the `/etc/hosts` line on the first run. The cluster keeps a manual
+certificate, so nothing here needs a DNS provider or a certificate authority. It is left
+running at the end.

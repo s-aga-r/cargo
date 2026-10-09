@@ -94,6 +94,22 @@ Cargo permits only one Active Object Storage Cluster. Other cluster records can 
 
 A host builds its own cluster when the site config holds `default_storage_cluster_config`. Without that key, an operator builds it from the desk. Read [object storage](object-storage.md).
 
+## Postgres
+
+A host builds the region's Postgres when the site config holds `default_postgres_config`. It listens on the mesh only and reports to Central as service `postgres`. Read [postgres](postgres.md).
+
+## Valkey
+
+A host builds the region's Valkey when the site config holds `default_valkey_config`. It listens on the mesh only, keeps nothing on disk, and reports to Central as service `valkey`. Read [valkey](valkey.md).
+
+## Mail
+
+A host builds the region's mail cluster when the site config holds `default_mail_cluster_config` and the region's object storage, Postgres, Valkey and DNS Zone are in place. Read [mail](mail.md).
+
+## SFU
+
+A host builds the region's SFU when the site config holds `default_sfu_config` and a DNS Zone is named. It is reached at `sfu.<zone>` directly, not through the Proxy, and reports to Central as service `sfu`. Read [sfu](sfu.md).
+
 ## Authentication
 
 Cargo calls Atlas with `Authorization: Bearer <atlas_token>` and `X-Tenant-ID: 0`. The token has audience `atlas-admin:<region-id>`, subject `cargo`, scope `*`, tenant `0`, and a 365-day lifetime.

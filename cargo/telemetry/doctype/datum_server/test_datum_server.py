@@ -321,6 +321,16 @@ class IntegrationTestTelemetryRouting(IntegrationTestCase):
 
 		return patch.object(ProxyClient, "from_settings", return_value=client), client
 
+	def test_a_host_whose_machine_died_is_failed(self):
+		"""Atlas says `failed`; Cargo records a Machine as Broken or Terminated. The host must
+		read its own machine's words, not Atlas's."""
+		self.machine.db_set("status", "Broken")
+		self.server.sync_machines()
+
+		self.server.reload()
+		self.assertEqual(self.server.status, "Failed")
+		self.assertIn(self.machine.name, self.server.error)
+
 	def test_a_proxy_that_refuses_leaves_the_reason_on_the_host(self):
 		patched, _client = self.proxy(map_domain=Mock(side_effect=ProxyError("proxy unreachable")))
 		with patched:
@@ -402,7 +412,7 @@ class IntegrationTestTelemetryRouting(IntegrationTestCase):
 		self.assertEqual(environment["DATUM_PORT"], DATUM_PORT)
 		self.assertEqual(environment["CLICKHOUSE_PORT"], self.server.clickhouse_port)
 		self.assertEqual(environment["WILDCARD_DOMAIN"], SETTINGS["wildcard_domain"])
-		self.assertIn("fd00::/8", environment["TRUSTED_PROXIES"])
+		self.assertIn("fdaa::/16", environment["TRUSTED_PROXIES"])
 
 	def test_a_region_with_no_domain_is_never_routed(self):
 		frappe.db.set_single_value("Cargo Settings", "wildcard_domain", "")

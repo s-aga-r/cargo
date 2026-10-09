@@ -1,0 +1,146 @@
+{
+ "actions": [],
+ "creation": "2026-09-01 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "general_tab",
+  "general_section",
+  "skip_domain_verification",
+  "require_domain_grant",
+  "verify_stalwart_tls",
+  "host_firewall",
+  "soak_minutes",
+  "jobs_section",
+  "column_break_jobs",
+  "dmarc_report_retention_days",
+  "tls_report_retention_days",
+  "disabled_domain_retention_days",
+  "ownership_miss_limit",
+  "dkim_section",
+  "sign_with_ed25519"
+ ],
+ "fields": [
+  {
+   "fieldname": "general_tab",
+   "fieldtype": "Tab Break",
+   "label": "General"
+  },
+  {
+   "fieldname": "general_section",
+   "fieldtype": "Section Break",
+   "label": "General"
+  },
+  {
+   "default": "0",
+   "description": "Take a tenant site's word for its domains: add them without the TXT record that proves control, and treat them as verified without checking their DNS records. For a development cloud, whose test domains exist in no public DNS. Never on a shared cluster: a wrongly claimed domain locks its owner out, and Stalwart accepts mail for every domain marked verified. Turning it off re-checks the domains it vouched for.",
+   "fieldname": "skip_domain_verification",
+   "fieldtype": "Check",
+   "label": "Skip Domain Verification"
+  },
+  {
+   "default": "0",
+   "description": "A site adds a domain only with a grant Central minted for it, once Central keeps the domain registry. Off, sites add domains on the TXT proof alone.",
+   "fieldname": "require_domain_grant",
+   "fieldtype": "Check",
+   "label": "Require Domain Grant"
+  },
+  {
+   "default": "1",
+   "description": "Turn off only on a development site whose cluster serves a staging certificate.",
+   "fieldname": "verify_stalwart_tls",
+   "fieldtype": "Check",
+   "label": "Verify Stalwart TLS"
+  },
+  {
+   "default": "0",
+   "description": "Also write ufw rules on each mail machine. Only for a region whose Atlas cannot change a running machine's firewall.",
+   "fieldname": "host_firewall",
+   "fieldtype": "Check",
+   "label": "Host Firewall"
+  },
+  {
+   "default": "10",
+   "description": "How long a rolling upgrade watches an upgraded node serve, with the cluster Healthy, before it moves to the next.",
+   "fieldname": "soak_minutes",
+   "fieldtype": "Int",
+   "label": "Soak Minutes"
+  },
+  {
+   "fieldname": "jobs_section",
+   "fieldtype": "Section Break",
+   "label": "Reports"
+  },
+  {
+   "fieldname": "column_break_jobs",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "90",
+   "description": "How long fetched DMARC reports are kept; empty means 90 days. Stalwart drops its own copy after 30 days, so this is the only history a site sees.",
+   "fieldname": "dmarc_report_retention_days",
+   "fieldtype": "Int",
+   "label": "DMARC Report Retention (Days)"
+  },
+  {
+   "default": "90",
+   "description": "How long fetched TLS reports are kept; empty means 90 days. Stalwart drops its own copy after 30 days, so this is the only history a site sees.",
+   "fieldname": "tls_report_retention_days",
+   "fieldtype": "Int",
+   "label": "TLS Report Retention (Days)"
+  },
+  {
+   "default": "90",
+   "description": "How long an archived site's domains are kept before their mailboxes are deleted. Until then a new site that proves control may claim them.",
+   "fieldname": "disabled_domain_retention_days",
+   "fieldtype": "Int",
+   "label": "Disabled Domain Retention (Days)",
+   "non_negative": 1
+  },
+  {
+   "default": "7",
+   "description": "Daily checks in a row that may find a domain's ownership record gone before the domain is disabled.",
+   "fieldname": "ownership_miss_limit",
+   "fieldtype": "Int",
+   "label": "Ownership Miss Limit",
+   "non_negative": 1
+  },
+  {
+   "fieldname": "dkim_section",
+   "fieldtype": "Section Break",
+   "label": "DKIM Signing"
+  },
+  {
+   "default": "0",
+   "description": "Every domain gets an RSA key (selector frappemail-rsa); check this to add an Ed25519 key as well (selector frappemail-ed25519). Off by default because many receivers still ignore Ed25519 signatures and treat the mail as unsigned. Keys are generated and held by the cluster and never rotate. Applies to domains registered on Stalwart after the change, the cluster default domain included; existing domains keep the keys they were created with.",
+   "fieldname": "sign_with_ed25519",
+   "fieldtype": "Check",
+   "label": "Sign with Ed25519 as well as RSA"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-10-09 14:03:50.360393",
+ "modified_by": "Administrator",
+ "module": "Mail",
+ "name": "Mail Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

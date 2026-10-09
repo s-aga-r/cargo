@@ -1,0 +1,213 @@
+{
+ "actions": [],
+ "creation": "2026-10-09 14:10:04.126224",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "machine_section",
+  "machine",
+  "ipv4_address",
+  "base_image",
+  "column_break_state",
+  "status",
+  "health",
+  "health_reason",
+  "error",
+  "sfu_section",
+  "hostname",
+  "ssl_email",
+  "suite_ref",
+  "image",
+  "column_break_media",
+  "workers",
+  "media_port",
+  "jwt_secret",
+  "metrics_token",
+  "setup_section",
+  "setup_log",
+  "auto_spawn",
+  "auto_setup_attempts"
+ ],
+ "fields": [
+  {
+   "fieldname": "machine_section",
+   "fieldtype": "Section Break",
+   "label": "Machine"
+  },
+  {
+   "fieldname": "machine",
+   "fieldtype": "Link",
+   "label": "Machine",
+   "options": "Machine",
+   "read_only": 1
+  },
+  {
+   "description": "The machine's public IPv4 from Atlas: what browsers send media to, and what the hostname's A record points at.",
+   "fieldname": "ipv4_address",
+   "fieldtype": "Data",
+   "label": "Public IPv4",
+   "read_only": 1
+  },
+  {
+   "description": "Atlas image the machine boots from. Blank picks the base image.",
+   "fieldname": "base_image",
+   "fieldtype": "Data",
+   "label": "Base Image"
+  },
+  {
+   "fieldname": "column_break_state",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Draft\nSetting Up\nActive\nFailed",
+   "read_only": 1
+  },
+  {
+   "default": "Unknown",
+   "fieldname": "health",
+   "fieldtype": "Select",
+   "label": "Health",
+   "options": "Unknown\nHealthy\nDegraded\nCritical",
+   "read_only": 1
+  },
+  {
+   "depends_on": "health_reason",
+   "fieldname": "health_reason",
+   "fieldtype": "Data",
+   "label": "Health Reason",
+   "read_only": 1
+  },
+  {
+   "depends_on": "error",
+   "fieldname": "error",
+   "fieldtype": "Long Text",
+   "label": "Error",
+   "max_height": "16rem",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sfu_section",
+   "fieldtype": "Section Break",
+   "label": "SFU"
+  },
+  {
+   "description": "sfu under the zone Cargo Settings names. Sites reach it over HTTPS; its certificate comes from Let's Encrypt on the machine.",
+   "fieldname": "hostname",
+   "fieldtype": "Data",
+   "label": "Hostname",
+   "read_only": 1
+  },
+  {
+   "description": "Address the certificate authority writes to about the certificate.",
+   "fieldname": "ssl_email",
+   "fieldtype": "Data",
+   "label": "SSL Email",
+   "options": "Email",
+   "reqd": 1
+  },
+  {
+   "default": "develop",
+   "description": "The frappe/suite branch or tag whose deploy files are installed.",
+   "fieldname": "suite_ref",
+   "fieldtype": "Data",
+   "label": "Suite Ref",
+   "reqd": 1
+  },
+  {
+   "default": "ghcr.io/frappe/suite/meet-sfu-server:latest",
+   "fieldname": "image",
+   "fieldtype": "Data",
+   "label": "Image",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_media",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "4",
+   "description": "mediasoup workers; one UDP media port each, opened in the firewall from Media Port on.",
+   "fieldname": "workers",
+   "fieldtype": "Int",
+   "label": "Workers",
+   "reqd": 1
+  },
+  {
+   "default": "40000",
+   "fieldname": "media_port",
+   "fieldtype": "Int",
+   "label": "Media Port",
+   "reqd": 1
+  },
+  {
+   "description": "Shared with every site that uses this SFU, as its sfu_secret. Central fetches it with an sfu:* token.",
+   "fieldname": "jwt_secret",
+   "fieldtype": "Password",
+   "label": "JWT Secret",
+   "read_only": 1
+  },
+  {
+   "fieldname": "metrics_token",
+   "fieldtype": "Password",
+   "label": "Metrics Token",
+   "read_only": 1
+  },
+  {
+   "fieldname": "setup_section",
+   "fieldtype": "Section Break",
+   "label": "Setup"
+  },
+  {
+   "fieldname": "setup_log",
+   "fieldtype": "Code",
+   "label": "Setup Log",
+   "max_height": "24rem",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "auto_spawn",
+   "fieldtype": "Check",
+   "label": "Auto Spawn",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "depends_on": "auto_spawn",
+   "fieldname": "auto_setup_attempts",
+   "fieldtype": "Int",
+   "label": "Auto Setup Attempts",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-10-09 14:10:04.126224",
+ "modified_by": "Administrator",
+ "module": "SFU",
+ "name": "SFU Server",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -62,6 +62,26 @@ class UnitTestAtlasClient(UnitTestCase):
 		self.assertNotIn("ip_address_id", body)
 		self.assertTrue(body["ipv4_internet_access"])
 		self.assertNotIn("egress", body)
+		self.assertNotIn("public_ipv4", body)
+		self.assertNotIn("firewall", body)
+
+	def test_a_public_address_and_firewall_are_asked_for_only_when_wanted(self):
+		rules = {"enabled": True, "inbound": [{"protocol": "tcp", "ports": "25", "cidrs": ["0.0.0.0/0"]}]}
+		with self.call(response(201, {"id": "vm-2"})) as request:
+			self.client.create_vm(
+				image_id="img-1",
+				cpu_millicores=1000,
+				memory_mib=1024,
+				disk_mib=10240,
+				public_key="ssh-ed25519 AAAA",
+				hostname="SC-0001-mail-0001",
+				public_ipv4=True,
+				firewall=rules,
+			)
+
+		body = request.call_args.kwargs["json"]
+		self.assertTrue(body["public_ipv4"])
+		self.assertEqual(body["firewall"], rules)
 
 	def test_a_created_machine_without_an_id_is_a_failure(self):
 		with self.call(response(201, {})), self.assertRaises(AtlasError):

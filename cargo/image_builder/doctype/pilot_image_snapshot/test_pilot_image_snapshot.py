@@ -13,7 +13,9 @@ from cargo.image_builder.doctype.pilot_image_snapshot.pilot_image_snapshot impor
 from cargo.testing import use_test_settings
 
 CONTROLLER = "cargo.image_builder.doctype.pilot_image_snapshot.pilot_image_snapshot"
-MACHINE = SimpleNamespace(address="fdaa:1::1d", get_password=lambda fieldname: "private-key")
+MACHINE = SimpleNamespace(
+	address="fdaa:1::1d", get_password=lambda fieldname: "private-key", host_key_pin=lambda: None
+)
 
 
 class IntegrationTestPilotImageSnapshot(IntegrationTestCase):

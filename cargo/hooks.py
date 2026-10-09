@@ -253,6 +253,11 @@ after_install = "cargo.install.after_install"
 # Automatically update python controller files with type annotations for this app.
 export_python_type_annotations = True
 
+# Whitelisted methods take JSON bodies natively and must annotate every argument, as
+# Suite Cloud's did; every Cargo method already does.
+use_json_request_body = True
+require_type_annotated_api_methods = True
+
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
@@ -272,20 +277,53 @@ scheduler_events = {
 			"cargo.cargo.doctype.machine.machine.sync_pending_machines",
 			"cargo.object_storage.spawn.ensure_cluster",
 			"cargo.telemetry.spawn.ensure_telemetry",
+			"cargo.postgres.spawn.ensure_postgres",
+			"cargo.valkey.spawn.ensure_valkey",
+			"cargo.mail.spawn.ensure_mail",
+			"cargo.sfu.spawn.ensure_sfu",
 			"cargo.image_builder.doctype.pilot_image.pilot_image.start_image_build_with_latest_pilot_release",
 			"cargo.image_builder.doctype.pilot_image.pilot_image.retry_failed_image_types_with_latest_version",
 			"cargo.image_builder.doctype.pilot_image.pilot_image.retire_older_images",
 			# Machines die without telling anyone, so health is re-read on a clock. A minute
 			# is what sets alerting latency; the read is two calls to the gateway.
 			"cargo.object_storage.health.refresh_health",
+			"cargo.mail.health.refresh_health",
+			"cargo.mail.cluster.bootstrap.poll_pending",
+			"cargo.postgres.health.refresh_health",
+			"cargo.valkey.health.refresh_health",
+			"cargo.sfu.health.refresh_health",
 		],
 		# One SSH session per node, so five minutes rather than one. Nothing Garage
 		# exports moves meaningfully faster.
 		"*/5 * * * *": [
 			"cargo.object_storage.health.ship_metrics",
+			"cargo.mail.health.ship_metrics",
 		],
 	},
 	"hourly": [
 		"cargo.object_storage.health.prune_history",
+		"cargo.mail.health.prune_history",
+		"cargo.postgres.health.prune_history",
+		"cargo.valkey.health.prune_history",
+		"cargo.sfu.health.prune_history",
+		# A customer domain goes live once its records resolve, and a DKIM key the cluster was
+		# still generating is picked up on the next pass. A failed lookup never turns one off.
+		"cargo.mail.doctype.mail_domain.mail_domain.refresh_rotating_domains",
+		"cargo.mail.doctype.mail_domain.mail_domain.verify_unverified_domains",
+		"cargo.mail.tenancy.platform.provide_platform_addresses",
+		"cargo.mail.doctype.dmarc_report.dmarc_report.fetch_all_clusters",
+		"cargo.mail.doctype.tls_report.tls_report.fetch_all_clusters",
+	],
+	"daily": [
+		"cargo.backup.backup_database",
+		"cargo.postgres.backup.backup_databases",
+		"cargo.cargo.doctype.dns_record.dns_record.verify_all_dns_records",
+		"cargo.mail.doctype.stalwart_cluster.stalwart_cluster.check_all_clusters",
+		"cargo.mail.doctype.stalwart_node.stalwart_node.verify_all_ptr_records",
+		"cargo.mail.doctype.egress_ip_pool.egress_ip_pool.verify_all_ptr_records",
+		"cargo.mail.doctype.dmarc_report.dmarc_report.prune_expired_reports",
+		"cargo.mail.doctype.tls_report.tls_report.prune_expired_reports",
+		"cargo.mail.doctype.mail_domain.mail_domain.purge_disabled_domains",
+		"cargo.mail.doctype.mail_domain.mail_domain.reverify_ownership",
 	],
 }

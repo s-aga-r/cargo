@@ -1,90 +1,63 @@
 # What Cargo and Central say to each other
 
-Two conversations, each one way.
+Three conversations.
 
-**Cargo → Central** is one webhook, and nothing else: a cluster reports whether it can be
-used. Cargo holds no Central credential and calls no Central endpoint.
+**Cargo → Central** is one signed delivery per service, and nothing else: a service reports whether it can be used. Cargo holds no Central credential and calls no Central endpoint.
 
-**Central → Cargo** is bucket work: make a bucket, drop it, add, rotate or remove its keys. Cargo
-owns the cluster's admin token, so Central asks rather than acts.
+**Central → Cargo** is bucket work and mail-site work: make a bucket, drop it, add, rotate or remove its keys; register a site for mail, set what it may do, suspend, resume or archive it. Cargo owns every service's admin credential, so Central asks rather than acts.
 
-Cargo's side is `cargo/object_storage/api/bucket.py` and the webhook built in
-`cargo/object_storage/doctype/object_storage_cluster/object_storage_cluster.py`. Central's
-side is `central/api/cargo_webhooks.py` and `central/integrations/cargo_client.py`.
+**Site → Cargo** is the mail directory: a site adds domains, mailboxes, groups and lists on its own slice, with a token Central minted for it.
+
+Cargo's side is `cargo/object_storage/api/bucket.py`, `cargo/mail/api/central.py`, `cargo/mail/api/mail/` and the webhooks built in each service's doctype. Central's side is `central/api/state_delivery.py` with `central/integrations/state_delivery.py` behind it, `central/integrations/cargo.py`, and `central/integrations/object_storage.py`.
 
 ## Central enrolling Cargo
 
-Before Cargo reports anything it has to be told where, and with which secret. Central owns
-both, so Central sets them:
+Before Cargo reports anything it has to be told where, and with which secret. Central owns both, so Central sets them, once it has seen Cargo answer `/api/method/ping`:
 
 ```
 POST {cargo_url}/api/method/cargo.api.webhooks.configure
-X-Cargo-Access-Token: <a token for atlas-cargo:<region-id>>
+X-Cargo-Access-Token: <a token for atlas-cargo:<region-id> with scope bucket:*>
 
 {"request_url": "https://central.example.com/api/method/central.api.state_delivery.receive",
  "webhook_secret": "a-shared-secret",
  "enabled": true}
 ```
 
-One receiver and one secret serve every service this region runs, so Cargo stores them on
-Cargo Settings and nothing else. Each delivery reads them when it is built, and knows
-nothing about how they got there. A repeated call refreshes a rotated secret.
+One receiver and one secret serve every service this region runs, so Cargo stores them on Cargo Settings and nothing else. Each delivery reads them when it is built, and knows nothing about how they got there. A repeated call refreshes a rotated secret. `enabled: false` stops the reports and keeps the receiver.
 
-`enabled: false` stops the reports and keeps the receiver, so turning them back on needs no
-second handover.
-
-```json
-{"request_url": "https://central.example.com/api/method/central.api.state_delivery.receive", "enabled": true}
-```
-
-Until this call lands, `central_webhook_url` is empty and a host refuses to configure a
-delivery rather than pointing one at a guess. A delivery built before a later call keeps
-the old receiver until it is next built.
+Until this call lands, `central_webhook_url` is empty and a host refuses to configure a delivery rather than pointing one at a guess.
 
 ## Cargo reporting in
 
-A **Frappe Webhook**, created against the cluster when the cluster is created, firing
-`on_update` when `doc.status in ("Active", "Failed")` — the two states worth a call.
+A **Frappe Webhook**, created against the service's record when the record is created, firing `on_update` when its status is one worth a call.
 
 ```
-POST {central_url}/api/method/central.api.cargo_webhooks.object_storage_cluster_webhook
+POST {central_webhook_url}
+X-FC-Source: cargo
+X-FC-Region: <region>
 X-Frappe-Webhook-Signature: <base64 HMAC-SHA256 of the body>
 ```
 
 | Send | What it is |
 |---|---|
-| `region` | Which cluster this is. Central identifies a cluster by its region |
+| `region` | Which region this is. Central identifies a service by its region |
 | `region_id` | Atlas's numeric id for that region |
-| `service` | `storage` |
-| `status` | `Active` once the cluster can hold an object, `Failed` when it never will |
-| `service_endpoint` | The cluster's gateway, where benches speak S3 |
+| `service` | `storage`, `telemetry`, and from the mail phases `mail`, `postgres`, `valkey` |
+| `status` | `Available` once the service can be used, `Not Available` when it cannot |
+| `service_endpoint` | Where the service is reached: the S3 gateway, the telemetry write URL, the mail cluster's HTTPS base URL |
 
-Frappe signs the body with the shared `CENTRAL_WEBHOOK_SECRET` rather than sending it, so the
-secret never leaves the host and the signature covers the payload. Central looks the region's
-Cargo Instance up to find which secret to check — the region in the body selects a secret, it
-is never trusted on its own — and every rejection is the same 403, with the real reason in
-the Error Log.
+`X-FC-Source` picks Central's handler; the signature, checked against the region's secret, is what authorises the write. Central records only the words above: a report naming another service or status is ignored, with the reason in its reply, so a wrong delivery is readable in the sender's own log. Each region and service has one `Service Detail` row; `activated_on` marks the first report of an outage ending.
 
-Central creates the region's `Service Backend` on the first report, fills in
-`service_endpoint`, sets `is_active` from the status, and marks the Cargo Instance
-**Registered**. Registration is what mints the instance's access token, so a region that has
-never reported has nothing for Central to call it with.
-
-`Active` is not "the nodes joined". It is "this cluster can hold an object", which needs an
-applied layout as well — before that Garage answers but its nodes carry no storage role.
+`Available` is not "the machines joined". For storage it is "this cluster can hold an object", which needs an applied layout; for mail it is "the cluster serves a valid certificate and holds a management key".
 
 ## Central calling Cargo
 
 ```
-POST {cargo_url}/api/method/cargo.object_storage.api.bucket.<name>
-X-Cargo-Access-Token: <the Cargo Instance's cargo_access_token>
+POST {cargo_url}/api/method/<method>
+X-Cargo-Access-Token: <token>
 ```
 
-JSON in, JSON out, unwrapped from Frappe's `{"message": ...}`. Every call takes the same two
-fields: `name`, the bucket, and `region`.
-
-Cargo verifies the token against the merged key set at its configured `JWKS_URL`, and holds no
-verification secret of its own. Every check below must pass, in this order:
+JSON in, JSON out, unwrapped from Frappe's `{"message": ...}`. Cargo verifies the token against the merged key set at its configured `JWKS_URL` and holds no verification secret of its own. Every check below must pass, in this order:
 
 | Check | Rule |
 |---|---|
@@ -93,70 +66,80 @@ verification secret of its own. Every check below must pass, in this order:
 | Issuer | `iss` equals the issuer that `kid` namespace belongs to. |
 | Audience | `aud` is exactly `atlas-cargo:<region-id>`. |
 | Claims | `iss`, `sub`, `aud`, `iat` and `exp` are all present, and `exp` is in the future. |
+| Coherence | Only `iss` `central` may carry a `site` claim or a `mail` scope. A token carrying `site` carries neither `mail:*` nor `bucket:*`. The `mail` scope never appears without `site`. |
+| Scope | `scope` is a space-separated set, matched as exact strings; `*` names nothing. The endpoint's scope must be in it. |
 
-The key set carries both planes' keys, so a valid signature alone does not say who signed. The
-key ID decides which issuer a token may claim to be, and `iss` is held to it -- otherwise Central
-could sign a token claiming to be Atlas, or the reverse.
+A token that fails any check but the last answers `AuthenticationError` (401), with no detail. One that verifies but does not cover the call answers `PermissionError` (403).
 
-A failed check answers the same way whatever failed: `AuthenticationError`, no detail.
+The key set carries both planes' keys, so a valid signature alone does not say who signed. The key ID decides which issuer a token may claim to be, and `iss` is held to it. It travels in `X-Cargo-Access-Token` rather than `Authorization`, because Frappe rejects an unrecognised `Authorization` header before the endpoint is reached.
 
-Atlas already mints this audience for its own bucket call, with subject `atlas` and a 5-minute
-lifetime. Central does not mint it yet, so no Central call gets past the audience check today.
+Central mints these with `_mint_regional_token` in `central/sso.py`. `mint_cargo_token` already carries scope `bucket:*` for the calls below and for `configure`. The scopes Cargo knows:
 
-It travels in `X-Cargo-Access-Token` rather than `Authorization`, because Frappe rejects an
-unrecognised `Authorization` header with a 401 before the endpoint is reached.
+| Scope | Carried by | Opens |
+|---|---|---|
+| `bucket:*` | Central's `mint_cargo_token`; Atlas's own token for its bucket call | `cargo.object_storage.api.bucket.*`, `cargo.api.webhooks.configure` |
+| `mail:*` | Central's mail lifecycle token | `cargo.mail.api.central.*` |
+| `mail` with `site` | A site's token, minted by Central for one site | `cargo.mail.api.site.*`, `cargo.mail.api.mail.*` |
 
-A Cargo host serves one region. A call naming another is refused, and so is one arriving
-while the region has no single serving cluster — with two, nothing says which one a bucket
-belongs on, and guessing is worse than refusing.
+### Buckets
 
-### `create_bucket`
+A Cargo host serves one region. A call naming another is refused, and so is one arriving while the region has no single serving storage cluster. Every call takes `name`, the bucket, and `region`.
 
-The bucket and the first key that opens it:
+| Call | Does |
+|---|---|
+| `create_bucket` | The bucket and the first key that opens it, as `{"name", "region", "credentials": {"access_key", "secret_access_key"}}`. The secret is handed back here and nowhere else. Either both exist afterwards or neither. |
+| `delete_bucket` | Drops the bucket and all its keys. Garage refuses a bucket that still holds objects. |
+| `add_credentials` | One more key, in the same `credentials` shape, once. |
+| `rotate_credentials` | Takes `access_key`; the new key is made before the old one goes. |
+| `remove_credentials` | Takes `access_key`; refuses a bucket's last key. |
+| `get_usage` | What the bucket holds, against its caps. |
+| `set_quota` | Takes `size_gib` and `max_objects`; zero lifts a cap. |
 
-```json
-{
-  "name": "acme-backups",
-  "region": "blr",
-  "credentials": {"access_key": "GK31c2...", "secret_access_key": "b892c0..."}
-}
-```
+### Mail sites
 
-The secret is handed back here and nowhere else — Cargo keeps no copy. Central stores it on
-the `Service Credential` and hands the endpoint out from the `Service Backend` beside it.
+Central registers every site it places in the region, Suite site or not, and tells Cargo what the site may do. All under `cargo.mail.api.central`.
 
-Either both the bucket and its key exist, or neither does: a bucket nobody holds a key to is
-unreachable and invisible, so a failure to issue the key takes the bucket with it. A name
-already taken is refused before anything is made.
+| Call | Does |
+|---|---|
+| `create_site(site, mailboxes_allowed=True, ownership_token=None, title, contact_email, max_domains, max_accounts, max_groups, max_mailing_lists, max_disk_gb, default_disk_quota_gb)` | A Mail Site named `site`, Central's own name for it: the string its tokens will carry. `mailboxes_allowed` off means the site only sends. `ownership_token` is the team's, so one TXT record proves its domains in every region. Answers 201 with the site's profile, which carries `jmap_url` and `mail_hostname`. No secret is handed out. |
+| `get_site(site)` | The profile: status, cluster, title, contact, entitlement, limits and usage. |
+| `update_site(site, ...)` | Changes entitlement, title, contact or limits; omitted fields stay. |
+| `suspend_site(site)` | Stops the site's API and locks every mailbox the owner left enabled. |
+| `resume_site(site)` | Unlocks exactly what suspension locked. |
+| `archive_site(site, delete_data=False)` | Final. Without `delete_data`, locks the mailboxes and disables every domain, which are kept for the hold in Mail Settings and may be claimed by a new site that proves control; with it, every directory object is removed at once. |
 
-### `delete_bucket`
+### Domain grants
 
-Drops the bucket and all its keys, and frees the name with them. Garage refuses a bucket that
-still holds objects with a 409, which is what stops this ever taking data with it.
+Once Central keeps the domain registry, a site adds a domain with a grant: a `mail:domain` token Central mints for ten minutes, carrying `site`, `domain` and `holds_mailboxes`. `mail.domains.create_domain(domain, grant=...)` verifies it, requires it to name the calling site and that domain, runs the TXT proof as before, and stores `holds_mailboxes`. With `require_domain_grant` on in Mail Settings, a region refuses to add a domain without one.
 
-A bucket can have more than one key. Each key has full read and write access to the bucket.
+### Domain events
 
-### `add_credentials`
+Cargo tells Central about a site's domains through three deliveries on Mail Domain, to the same receiver and with the same headers as the service reports: `event` is `registered` (on insert), `changed` (when `enabled`, `is_verified` or `holds_mailboxes` changes) or `purged` (on delete), with `kind: "domain"`, `domain`, `site`, `enabled`, `verified` and `holds_mailboxes` carrying the domain's state at that moment. Domains nobody owns are not reported.
 
-One more key for the bucket. The other keys keep working. Returns the same `credentials`
-shape as `create_bucket`, once.
+### SFU
 
-### `rotate_credentials`
+Central fetches a region's SFU credential, `sfu_server_url` and `sfu_secret`, from `cargo.sfu.api.get_credential` with a token of scope `sfu:*`, which only Central holds, and configures sites with it. The SFU reports as service `sfu` with its public HTTPS URL.
 
-Takes `access_key`. Replaces that key and returns the new one in the `credentials` shape,
-once. The new key is made before the old one is deleted, so a failed rotation does not lock
-the bucket.
+## A site calling Cargo
 
-### `remove_credentials`
+A site reaches Cargo with a token Central minted for that site:
 
-Takes `access_key`. Deletes that key and returns `name`, `region` and `access_key`. The
-bucket, its objects and its other keys stay. Cargo refuses to remove a bucket's last key.
+| Claim | Value |
+|---|---|
+| `iss`, `sub` | `central` |
+| `aud` | `atlas-cargo:<region-id>` |
+| `site` | Central's `Site.name`, the same string `create_site` was given |
+| `scope` | `mail` |
+| `exp` | About an hour after `iat` |
+
+Cargo resolves the site from the `site` claim and nothing else. A suspended site is told so (`SiteSuspendedError`, 403); an archived or unknown one is refused (`SiteAuthError`, 401). Each site may make 300 requests per minute. Anything that belongs to another site is reported as not found, never as forbidden. If the cluster refuses a change, the site gets 422 with Stalwart's error type (`StalwartRejected`); if Cargo's own cluster credentials are wrong, 502 (`ClusterMisconfiguredError`).
+
+The methods are those Suite Cloud served, under `cargo.mail.api`: `site.ping`, `site.update_site_profile`, and the `mail.domains`, `mail.accounts`, `mail.groups`, `mail.mailing_lists`, `mail.meta`, `mail.dmarc` and `mail.tls` modules. `cargo/mail/tests/test_api_contract.py` pins the list and the exception names a client switches on.
+
+How a site obtains its token, and how Central hands a plain site its send-only credential, are set out in `suite-cloud-migration.md`: Pilot fetches the token through its per-site Central proxy, and Central pushes the credential to Pilot as a site action.
 
 ## Who holds which key
 
-Cargo keeps the powerful token. Central never sees one.
+Cargo keeps the powerful tokens. Central never sees one.
 
-The cluster's `rpc_secret`, admin token and metrics token are minted on the host and stay
-there. Central's reach is exactly the calls above — it cannot change a layout, read a
-node, or touch an object. Object traffic never goes near either of them: a bench speaks S3 to
-the gateway directly, so a Cargo host being down stops new buckets, not existing ones.
+Garage's `rpc_secret`, admin token and metrics token, and Stalwart's admin password and management key, are minted on the host and stay there. Central's reach is exactly the calls above: it cannot change a layout, read a node, touch an object, or log into a mailbox. Object and mail traffic never goes near either of them: a bench speaks S3 to the gateway and a mail client speaks IMAP, JMAP and SMTP to the cluster, so a Cargo host being down stops new buckets and directory changes, not existing ones.

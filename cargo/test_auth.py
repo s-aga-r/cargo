@@ -18,6 +18,7 @@ from cargo.auth import (
 	authenticate_request,
 	issuer_for_key_id,
 	token_claims,
+	token_is_coherent,
 	verify_token,
 )
 
@@ -164,8 +165,11 @@ class UnitTestAccessToken(UnitTestCase):
 			headers={"kid": KEY_ID},
 		)
 
-		with patch("cargo.auth.jwks_client") as client:
-			self.assertIsNone(self.claims_of(token))
+		with (
+			patch("frappe.get_cached_doc", return_value=SETTINGS),
+			patch("cargo.auth.jwks_client") as client,
+		):
+			self.assertIsNone(token_claims(token))
 
 		client.assert_not_called()
 
@@ -215,7 +219,7 @@ class UnitTestVerifyToken(UnitTestCase):
 	"""What the decorator does to a request, given a token that does or does not verify."""
 
 	def handler(self):
-		@verify_token
+		@verify_token("bucket:*")
 		def create_bucket(name: str) -> str:
 			return name
 
@@ -231,14 +235,17 @@ class UnitTestVerifyToken(UnitTestCase):
 			yield header
 
 	def test_a_verified_token_runs_the_handler_and_leaves_its_claims_behind(self):
-		with self.request("a-token", {"aud": AUDIENCE, "instance": "cargo-1"}) as header:
+		with self.request("a-token", {"aud": AUDIENCE, "instance": "cargo-1", "scope": "bucket:*"}) as header:
 			self.assertEqual(self.handler()("data"), "data")
 
 		header.assert_called_with(TOKEN_HEADER)
 		self.assertEqual(frappe.local.request_claims.instance, "cargo-1")
 
 	def test_a_request_with_no_token_never_reaches_the_handler(self):
-		with self.request(None, {"aud": AUDIENCE}), self.assertRaises(frappe.AuthenticationError):
+		with (
+			self.request(None, {"aud": AUDIENCE, "scope": "bucket:*"}),
+			self.assertRaises(frappe.AuthenticationError),
+		):
 			self.handler()("data")
 
 	def test_a_token_that_does_not_verify_never_reaches_the_handler(self):
@@ -256,6 +263,40 @@ class UnitTestVerifyToken(UnitTestCase):
 	def test_the_handler_keeps_its_own_signature(self):
 		"""Frappe maps request arguments off it, so the wrapper cannot hide it."""
 		self.assertEqual(self.handler().__name__, "create_bucket")
+
+	def test_a_token_that_verifies_but_covers_another_call_is_forbidden(self):
+		"""Verified says who is calling; the scope says what they may call. `*` names nothing."""
+		for scope in ("mail:*", "*", ""):
+			claims = {"aud": AUDIENCE, "iss": "central", "scope": scope}
+			with self.request("a-token", claims), self.assertRaises(frappe.PermissionError):
+				self.handler()("data")
+
+	def test_an_endpoint_must_name_its_scopes(self):
+		self.assertRaises(TypeError, verify_token)
+		self.assertRaises(TypeError, verify_token, lambda: None)
+
+
+class UnitTestTokenCoherence(UnitTestCase):
+	"""What a token may say depends on who signed it."""
+
+	def claims(self, scope: str, issuer: str = "central", **extra) -> dict:
+		return {"iss": issuer, "aud": AUDIENCE, "scope": scope, **extra}
+
+	def test_centrals_own_tokens_carry_wide_scopes_and_no_site(self):
+		self.assertTrue(token_is_coherent(self.claims("bucket:*")))
+		self.assertTrue(token_is_coherent(self.claims("mail:*")))
+
+	def test_a_site_token_is_bound_to_its_site_and_nothing_wider(self):
+		self.assertTrue(token_is_coherent(self.claims("mail", site="site-1")))
+		self.assertFalse(token_is_coherent(self.claims("mail")))
+		self.assertFalse(token_is_coherent(self.claims("mail mail:*", site="site-1")))
+		self.assertFalse(token_is_coherent(self.claims("bucket:*", site="site-1")))
+
+	def test_only_central_names_a_site_or_a_mail_scope(self):
+		atlas = f"atlas:{REGION_ID}"
+		self.assertTrue(token_is_coherent(self.claims("bucket:*", issuer=atlas)))
+		self.assertFalse(token_is_coherent(self.claims("mail:*", issuer=atlas)))
+		self.assertFalse(token_is_coherent(self.claims("bucket:*", issuer=atlas, site="site-1")))
 
 
 class UnitTestJwksUrl(UnitTestCase):
@@ -283,4 +324,18 @@ class UnitTestAuthenticateRequest(UnitTestCase):
 	def test_a_token_is_still_required_before_anything_is_fetched(self):
 		with patch("frappe.get_request_header", return_value="   "):
 			with self.assertRaises(frappe.AuthenticationError):
-				authenticate_request()
+				authenticate_request(("bucket:*",))
+
+
+class UnitTestCentralOnlyScopes(UnitTestCase):
+	"""Atlas may vouch for buckets; what mail and the SFU hand out is Central's alone."""
+
+	def test_an_atlas_signed_token_may_carry_bucket_but_not_mail_or_sfu_scopes(self):
+		from cargo.auth import token_is_coherent
+
+		atlas = {"iss": "atlas:1", "sub": "atlas"}
+		self.assertTrue(token_is_coherent({**atlas, "scope": "bucket:*"}))
+		self.assertFalse(token_is_coherent({**atlas, "scope": "sfu:*"}))
+		self.assertFalse(token_is_coherent({**atlas, "scope": "mail:*"}))
+		self.assertFalse(token_is_coherent({**atlas, "scope": "mail:domain"}))
+		self.assertTrue(token_is_coherent({"iss": "central", "sub": "central", "scope": "sfu:*"}))

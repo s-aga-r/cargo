@@ -13,14 +13,14 @@ from frappe.utils.password import get_decrypted_password
 from cargo.atlas_client import host_port
 from cargo.client_models import GATEWAY, STORAGE
 from cargo.object_storage.client import Client, Error
-from cargo.ssh import run_over_ssh, script
+from cargo.service import TRUSTED_PROXIES, wildcard_domain
+from cargo.ssh import HostKeyPin, run_over_ssh, script
 
 BINARY_URL = "https://garagehq.deuxfleurs.fr/_releases/{version}/{arch}/garage"
 CONF = ("object_storage", "conf", "garage")
 NGINX_CONF = ("object_storage", "conf", "nginx", "install.sh")
 # Who may say where a request came from. The proxy reaches the gateway over the mesh, and a
 # unique-local address cannot arrive from the internet, so no client can forge the header.
-TRUSTED_PROXIES = ("127.0.0.1", "::1", "fd00::/8")
 GIGABYTE = 1000**3
 #: `Machine.name`, e.g. ``OSC-0001-storage-0001``.
 MachineName = str
@@ -36,6 +36,7 @@ class MachineRow(TypedDict):
 	zone: str
 	address: str
 	disk_size_gb: int
+	ssh_host_key: str | None
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,7 @@ class Setup(Client):
 				"reference_name": self.cluster.name,
 				"status": "Running",
 			},
-			fields=["name", "role", "zone", "address", "disk_size_gb"],
+			fields=["name", "role", "zone", "address", "disk_size_gb", "ssh_host_key"],
 			order_by="creation",
 		)
 
@@ -72,7 +73,22 @@ class Setup(Client):
 
 	def run(self, machine: MachineRow, script: str, on_output: Callable[[str], None] | None = None) -> str:
 		"""Every command a node is given, streamed to `on_output` as it arrives."""
-		return run_over_ssh(machine["address"], script, self.key_for(machine), on_output=on_output)
+		return run_over_ssh(
+			machine["address"],
+			script,
+			self.key_for(machine),
+			on_output=on_output,
+			pin=self.pin_for(machine),
+			secrets=self.secrets.values(),
+		)
+
+	def pin_for(self, machine: MachineRow) -> HostKeyPin:
+		return HostKeyPin(
+			machine.get("ssh_host_key"),
+			lambda line: frappe.db.set_value(
+				"Machine", machine["name"], "ssh_host_key", line, update_modified=False
+			),
+		)
 
 	def layout_version(self) -> int:
 		"""The applied layout version, zero if none. Staged changes are a separate field."""
@@ -138,11 +154,7 @@ class Setup(Client):
 	@cached_property
 	def wildcard_domain(self) -> str:
 		"""The domain the gateway's subdomains hang off."""
-		domain = frappe.db.get_single_value("Cargo Settings", "wildcard_domain")
-		if not domain:
-			frappe.throw(_("Set a Wildcard Domain in Cargo Settings before setting up a gateway."))
-
-		return domain
+		return wildcard_domain()
 
 	def install_environment(self, machine: MachineRow) -> dict[str, str]:
 		"""What a node needs to write its own garage.toml and unit."""

@@ -37,7 +37,7 @@ class IntegrationTestGatewayNginx(IntegrationTestCase):
 	def test_only_the_mesh_and_this_machine_may_name_the_client(self):
 		proxies = self.setup.nginx_environment()["TRUSTED_PROXIES"].split()
 
-		self.assertIn("fd00::/8", proxies)
+		self.assertIn("fdaa::/16", proxies)
 		self.assertNotIn("0.0.0.0/0", proxies)
 		self.assertNotIn("::/0", proxies)
 

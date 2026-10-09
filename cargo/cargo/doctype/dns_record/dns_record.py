@@ -1,0 +1,232 @@
+# Copyright (c) 2024, Frappe Technologies Pvt. Ltd. and contributors
+# For license information, please see license.txt
+
+from functools import cached_property
+
+import frappe
+from frappe import _
+from frappe.model.document import Document
+from frappe.utils import cint, now
+
+from cargo.cargo.doctype.dns_zone.dns_zone import APEX, DEFAULT_TTL, settings_zone
+from cargo.dns import get_dns_provider
+from cargo.dns.resolver import verify_dns_record
+
+
+class DNSRecord(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		category: DF.Literal["Node", "Ingress", "Egress", "SPF", "Platform", "Service", "Other"]
+		dns_zone: DF.Link
+		host: DF.Data
+		is_verified: DF.Check
+		last_checked_at: DF.Datetime | None
+		managed_by: DF.DynamicLink | None
+		managed_by_doctype: DF.Link | None
+		priority: DF.Int
+		ttl: DF.Int
+		type: DF.Literal["", "A", "AAAA", "CNAME", "MX", "TXT"]
+		value: DF.Text
+	# end: auto-generated types
+
+	@cached_property
+	def fqdn(self) -> str:
+		return self.dns_zone if self.host == APEX else f"{self.host}.{self.dns_zone}"
+
+	def validate(self) -> None:
+		self.host = (self.host or "").strip().lower()
+		self.value = (self.value or "").strip()
+		self.dns_zone = self.dns_zone or settings_zone()
+		if not self.dns_zone:
+			frappe.throw(_("Create a DNS Zone before adding DNS Records."))
+		if self.is_new():
+			self.validate_duplicate_record()
+
+		self.ttl = self.ttl or self.default_ttl()
+
+	def default_ttl(self) -> int:
+		return cint(frappe.get_cached_value("DNS Zone", self.dns_zone, "default_ttl")) or DEFAULT_TTL
+
+	def on_update(self) -> None:
+		if self.has_value_changed("value") or self.has_value_changed("ttl") or self.is_new():
+			self.push_to_provider()
+
+	def on_trash(self) -> None:
+		self.delete_from_provider()
+
+	def validate_duplicate_record(self) -> None:
+		"""Several records may share host and type (round-robin), but not the value too.
+
+		Different owners may want the same record (a pool address that reuses its gateway's
+		hostname); each keeps its own row and the provider record lives as long as one remains.
+		"""
+
+		if frappe.db.exists(
+			"DNS Record",
+			{
+				"dns_zone": self.dns_zone,
+				"host": self.host,
+				"type": self.type,
+				"value": self.value,
+				"name": ["!=", self.name],
+				"managed_by_doctype": self.managed_by_doctype or ["is", "not set"],
+				"managed_by": self.managed_by or ["is", "not set"],
+			},
+		):
+			frappe.throw(
+				_("DNS Record {0} {1} {2} already exists.").format(self.host, self.type, self.value),
+				title=_("Duplicate Record"),
+			)
+
+	# --- provider sync ------------------------------------------------------
+
+	def push_to_provider(self) -> None:
+		if frappe.flags.do_not_enqueue or frappe.flags.in_test:
+			self.create_or_update_record_in_dns_provider()
+		else:
+			frappe.enqueue_doc(
+				self.doctype,
+				self.name,
+				"create_or_update_record_in_dns_provider",
+				queue="short",
+				enqueue_after_commit=True,
+				at_front=True,
+			)
+
+	@frappe.whitelist()
+	def sync_dns_record(self) -> None:
+		frappe.only_for("System Manager")
+		self.create_or_update_record_in_dns_provider()
+
+	def create_or_update_record_in_dns_provider(self) -> None:
+		result = False
+		if provider := get_dns_provider(self.dns_zone):
+			result = provider.ensure_dns_record(
+				type=self.type, host=self.host, value=self.value, ttl=self.ttl, priority=self.priority
+			)
+
+		self.db_set({"is_verified": cint(result), "last_checked_at": now()}, notify=True)
+
+	def delete_from_provider(self) -> None:
+		still_wanted = frappe.db.exists(
+			"DNS Record",
+			{
+				"dns_zone": self.dns_zone,
+				"host": self.host,
+				"type": self.type,
+				"value": self.value,
+				"name": ["!=", self.name],
+			},
+		)
+		if still_wanted:
+			return
+		if provider := get_dns_provider(self.dns_zone):
+			provider.delete_dns_record(type=self.type, host=self.host, value=self.value)
+
+	# --- verification -------------------------------------------------------
+
+	@frappe.whitelist()
+	def verify_dns_record(self, save: bool = False) -> bool:
+		if getattr(frappe.local, "request", None):  # the scheduler calls this too
+			frappe.only_for("System Manager")
+		verified = verify_dns_record(self.fqdn, self.type, self.value)
+		if verified is None:
+			frappe.msgprint(
+				_("Could not resolve {0} right now.").format(frappe.bold(self.fqdn)), indicator="orange"
+			)
+			return bool(self.is_verified)
+		self.is_verified = cint(verified)
+		self.last_checked_at = now()
+
+		if self.is_verified:
+			frappe.msgprint(
+				_("Verified {0}:{1} record.").format(frappe.bold(self.fqdn), frappe.bold(self.type)),
+				indicator="green",
+				alert=True,
+			)
+		else:
+			frappe.msgprint(
+				_("Could not verify {0}:{1} record.").format(frappe.bold(self.fqdn), frappe.bold(self.type)),
+				indicator="orange",
+				alert=True,
+			)
+
+		if save:
+			self.db_set({"is_verified": self.is_verified, "last_checked_at": self.last_checked_at})
+
+		return bool(self.is_verified)
+
+
+def reconcile_managed_records(owner_doctype: str, owner: str, desired: list[dict]) -> None:
+	"""Makes the owner's DNS Records exactly ``desired``.
+
+	``desired`` rows are ``{"dns_zone", "host", "type", "value", "category", "priority"?, "ttl"?}``.
+	Rows already present are left alone (their verification state survives); missing ones are
+	inserted and stale ones deleted, which removes them at the provider too.
+	"""
+
+	wanted = {
+		(row["dns_zone"], row["host"].lower(), row["type"], row["value"].strip()): row for row in desired
+	}
+	existing = frappe.get_all(
+		"DNS Record",
+		filters={"managed_by_doctype": owner_doctype, "managed_by": owner},
+		fields=["name", "dns_zone", "host", "type", "value", "ttl", "priority"],
+	)
+
+	for record in existing:
+		key = (record.dns_zone, record.host, record.type, (record.value or "").strip())
+		if key in wanted:
+			row = wanted.pop(key)
+			changes = {
+				field: row[field]
+				for field in ("ttl", "priority")
+				if row.get(field) is not None and cint(row[field]) != cint(record.get(field))
+			}
+			if changes:
+				doc = frappe.get_doc("DNS Record", record.name)
+				doc.update(changes)
+				doc.save(ignore_permissions=True)
+		else:
+			frappe.delete_doc("DNS Record", record.name, ignore_permissions=True, force=True)
+
+	for row in wanted.values():
+		doc = frappe.new_doc("DNS Record")
+		doc.update(row)
+		doc.managed_by_doctype = owner_doctype
+		doc.managed_by = owner
+		doc.insert(ignore_permissions=True)
+
+
+def delete_managed_records(owner_doctype: str, owner: str) -> None:
+	reconcile_managed_records(owner_doctype, owner, [])
+
+
+def verify_all_dns_records() -> None:
+	"""Daily: resolve every record, and push again any unverified record whose zone has a
+	provider, since a push that failed once (a provider outage) is otherwise never retried."""
+	provided = {
+		zone.name
+		for zone in frappe.get_all("DNS Zone", {"dns_provider": ("is", "set"), "enabled": 1}, ["name"])
+	}
+	for row in frappe.get_all("DNS Record", ["name", "dns_zone", "is_verified"]):
+		doc = frappe.get_doc("DNS Record", row.name)
+		if not row.is_verified and row.dns_zone in provided:
+			try:
+				doc.create_or_update_record_in_dns_provider()
+			except Exception:
+				frappe.log_error(title=f"DNS Record {row.name} could not be pushed")
+		doc.verify_dns_record(save=True)
+
+
+@frappe.whitelist(methods=["POST"])
+def enqueue_verify_all_dns_records() -> None:
+	frappe.only_for("System Manager")
+
+	frappe.enqueue(verify_all_dns_records, queue="long", job_id="verify_all_dns_records", deduplicate=True)

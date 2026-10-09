@@ -10,6 +10,8 @@ dynamic = ["version"]
 dependencies = [
     # "frappe~=16.0.0" # Installed and managed by bench.
     "boto3~=1.35",  # S3 uploads: Garage's admin API moves no object bytes.
+    "dnspython~=2.6.1",  # DNS Record verification and reverse-DNS lookups.
+    "dns-lexicon~=3.20.1",  # The DNS provider API behind DNS Zone (Route53, Cloudflare, ...).
 ]
 
 [build-system]
@@ -67,6 +69,8 @@ typing-modules = ["frappe.types.DF"]
 # Vendored from frappe/press (AGPL-3.0). Kept byte-comparable with upstream so future
 # diffs stay clean, so its lint config is honoured rather than ours.
 "cargo/workflow_engine/**" = ["RUF100", "UP046", "UP047", "I001"]
+# Copied from frappe/suite_cloud, whose lint config does not cap complexity.
+"cargo/mail/**" = ["C901"]
 
 [tool.ruff.format]
 quote-style = "double"

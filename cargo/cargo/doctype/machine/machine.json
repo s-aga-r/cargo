@@ -13,6 +13,7 @@
   "column_break_state",
   "status",
   "address",
+  "public_ipv4",
   "last_synced_at",
   "storage_section",
   "cpu_millicores",
@@ -22,7 +23,8 @@
   "error",
   "section_break_ssh",
   "ssh_public_key",
-  "ssh_private_key"
+  "ssh_private_key",
+  "ssh_host_key"
  ],
  "fields": [
   {
@@ -94,6 +96,13 @@
    "read_only": 1
   },
   {
+   "description": "The public address Atlas gave this machine, when one was asked for. DNS and SPF use it; Cargo itself never does.",
+   "fieldname": "public_ipv4",
+   "fieldtype": "Data",
+   "label": "Public IPv4",
+   "read_only": 1
+  },
+  {
    "fieldname": "last_synced_at",
    "fieldtype": "Datetime",
    "label": "Last Synced At",
@@ -154,12 +163,19 @@
    "fieldtype": "Password",
    "label": "SSH Private Key",
    "read_only": 1
+  },
+  {
+   "description": "What the machine answered with on first contact. Every later connection must match it.",
+   "fieldname": "ssh_host_key",
+   "fieldtype": "Small Text",
+   "label": "SSH Host Key",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-04 14:15:20.778239",
+ "modified": "2026-10-09 12:21:30.719747",
  "modified_by": "Administrator",
  "module": "Cargo",
  "name": "Machine",

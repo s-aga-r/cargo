@@ -1,0 +1,85 @@
+{
+ "actions": [],
+ "creation": "2026-10-09 13:28:01.478364",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "database_name",
+  "username",
+  "password",
+  "column_break_owner",
+  "reference_doctype",
+  "reference_name",
+  "created_on_server"
+ ],
+ "fields": [
+  {
+   "fieldname": "database_name",
+   "fieldtype": "Data",
+   "label": "Database Name",
+   "reqd": 1,
+   "set_only_once": 1,
+   "unique": 1
+  },
+  {
+   "description": "The role that owns the database; the consumer connects as it.",
+   "fieldname": "username",
+   "fieldtype": "Data",
+   "label": "Username",
+   "read_only": 1
+  },
+  {
+   "fieldname": "password",
+   "fieldtype": "Password",
+   "label": "Password",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_owner",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "reference_doctype",
+   "fieldtype": "Link",
+   "label": "Used By Doctype",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "reference_name",
+   "fieldtype": "Dynamic Link",
+   "label": "Used By",
+   "options": "reference_doctype"
+  },
+  {
+   "fieldname": "created_on_server",
+   "fieldtype": "Check",
+   "label": "Created On Server",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-10-09 13:28:01.478364",
+ "modified_by": "Administrator",
+ "module": "Postgres",
+ "name": "Postgres Database",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "autoname": "field:database_name"
+}

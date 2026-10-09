@@ -1,3 +1,4 @@
+import json
 import os
 import shlex
 import stat
@@ -6,7 +7,8 @@ import tempfile
 import threading
 import time
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 import frappe
@@ -15,17 +17,26 @@ from frappe import _
 if typing.TYPE_CHECKING:
 	from frappe.model.document import Document
 
+
+@dataclass(frozen=True)
+class HostKeyPin:
+	"""The host key a machine answered with the first time, and how to remember it.
+
+	With `known` set the connection fails unless the machine presents that key; without it
+	the key presented is accepted and handed to `record`, which is the one chance to pin it."""
+
+	known: str | None
+	record: Callable[[str], None]
+
+
 SSH_TIMEOUT = 600
 LOG_FLUSH_SECONDS = 3  # how often a running command's output is published
 LOG_CACHE_TTL = 15 * 60
 ERROR_TAIL = 3000  # characters of output kept when a command fails
+MASK = "***"
 OPTIONS = (
 	"-o",
 	"IdentitiesOnly=yes",
-	"-o",
-	"StrictHostKeyChecking=accept-new",
-	"-o",
-	"UserKnownHostsFile=/dev/null",
 	"-o",
 	"ConnectTimeout=15",
 	"-o",
@@ -40,6 +51,33 @@ OPTIONS = (
 
 class SshError(RuntimeError):
 	"""A command run over SSH failed."""
+
+
+class Masker:
+	"""Hides every spelling of each secret in a line of output: as typed, as JSON would
+	escape it, and as a shell would quote it. Longest first, so a secret that contains another
+	is not left half shown."""
+
+	def __init__(self, secrets: Iterable[str]) -> None:
+		spellings: set[str] = set()
+		for secret in secrets:
+			if secret:
+				spellings.update(_spellings(str(secret)))
+		self.spellings = sorted(spellings, key=len, reverse=True)
+
+	def __call__(self, line: str) -> str:
+		for spelling in self.spellings:
+			line = line.replace(spelling, MASK)
+		return line
+
+
+def _spellings(secret: str) -> set[str]:
+	return {
+		secret,
+		json.dumps(secret)[1:-1],
+		json.dumps(secret, ensure_ascii=False)[1:-1],
+		shlex.quote(secret),
+	}
 
 
 class OutputLog:
@@ -158,18 +196,43 @@ def run_over_ssh(
 	user: str = "root",
 	timeout: int = SSH_TIMEOUT,
 	on_output: Callable[[str], None] | None = None,
+	pin: HostKeyPin | None = None,
+	secrets: Iterable[str] = (),
 ) -> str:
-	"""Pipe a script to ``bash -s`` and return what it printed, line by line as it arrives."""
+	"""Pipe a script to ``bash -s`` and return what it printed, line by line as it arrives.
+
+	Every spelling of `secrets` is masked before a line reaches `on_output`, the return value or
+	the error, so a script that echoes its environment or a command that quotes a rejected
+	object leaves nothing in a log. Without a `pin` the host key is taken on trust every time,
+	which is only for a machine nobody keeps a record of."""
 	if not key:
 		frappe.throw(_("No SSH private key, so {0} cannot be reached.").format(address))
 
 	with tempfile.NamedTemporaryFile("w", delete=False) as key_file:
 		key_file.write(key if key.endswith("\n") else f"{key}\n")
+		key_file.flush()
 		path = key_file.name
 	os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+	with tempfile.NamedTemporaryFile("w", delete=False) as hosts_file:
+		if pin and pin.known:
+			hosts_file.write(f"{pin.known}\n")
+		hosts_file.flush()
+		hosts_path = hosts_file.name
+	checking = "yes" if pin and pin.known else "accept-new"
 
 	process = subprocess.Popen(
-		["ssh", "-i", path, *OPTIONS, f"{user}@{address}", "bash -s"],
+		[
+			"ssh",
+			"-i",
+			path,
+			*OPTIONS,
+			"-o",
+			f"UserKnownHostsFile={hosts_path}",
+			"-o",
+			f"StrictHostKeyChecking={checking}",
+			f"{user}@{address}",
+			"bash -s",
+		],
 		stdin=subprocess.PIPE,
 		stdout=subprocess.PIPE,
 		stderr=subprocess.STDOUT,
@@ -179,19 +242,27 @@ def run_over_ssh(
 	# Popen has no timeout of its own once we are streaming, so a watchdog enforces it.
 	watchdog = threading.Timer(timeout, process.kill)
 	watchdog.start()
+	mask = Masker(secrets)
 	lines: list[str] = []
 
 	try:
 		process.stdin.write(script)
 		process.stdin.close()
 		for line in process.stdout:
+			line = mask(line)
 			lines.append(line)
 			if on_output:
 				on_output(line)
 		process.wait()
 	finally:
 		watchdog.cancel()
+		if process.poll() is None:  # the read loop was interrupted by something other than the watchdog
+			process.kill()
+			process.wait()
 		os.unlink(path)
+		if pin and not pin.known and (presented := Path(hosts_path).read_text().strip()):
+			pin.record(presented)
+		os.unlink(hosts_path)
 
 	output = "".join(lines)
 	if process.returncode != 0:

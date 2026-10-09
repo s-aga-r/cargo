@@ -41,13 +41,25 @@ One machine per call. Cargo asks for them one at a time and tracks each as its o
 | `ssh_keys` | A list of one: root's public key. Cargo keeps the private half |
 | `hostname` | The Machine's own name, e.g. `OSC-0001-storage-0001` |
 | `metadata` | Free-form. Cargo puts the machine's `role` here |
-| `egress` | Always `uplink` — see below |
+| `ipv4_internet_access` | Always `true` — see below |
 
 Send back the machine, including its `id`. Don't wait for it to boot; Cargo polls.
 
-**No public address is asked for.** `egress: uplink` gives the machine the internet without an
+**Most machines get no public address.** `ipv4_internet_access: true` gives the machine the internet without an
 address of its own. Everything Cargo does to a machine — SSH, Garage's admin API, Garage
 peering — goes over the mesh.
+
+A service the Internet must reach is the exception. For it Cargo also sends:
+
+| Send | What it is |
+|---|---|
+| `public_ipv4: true` | Give the machine a public IPv4, reported back as `network.public_ipv4`. Mail nodes need one for SMTP, and Atlas sets its reverse DNS to the hostname Cargo names |
+| `firewall` | `{"enabled": true, "inbound": [...], "outbound": [...]}`, the shape Central sends for tenant machines: default deny inbound, each rule a protocol, ports and CIDRs. Cargo opens the service's own ports to the world and everything to the mesh prefix `fdaa::/16`; SSH never leaves the mesh |
+
+Traffic from such a machine must leave from its own public address, not the shared uplink:
+mail is judged by the address it comes from. Whether the rules can change on a running
+machine is still to be agreed; until it is, a service that must change them installs `ufw`
+with the same set.
 
 ## Checking on a machine — `GET /virtual-machines/{id}`
 
@@ -58,9 +70,10 @@ Cargo polls this until the machine is usable, and again whenever it needs the cu
 | `current_state` | `running` once it is up. `failed` means it is never coming up |
 | `network.mesh_ipv6` | The mesh address. This is how Cargo reaches the machine |
 
-Cargo reads nothing else from the reply. `network.public_ipv4` in particular is never used:
-everything Cargo does to a machine goes over the mesh, and public traffic reaches a service
-through the proxy in front of it, not the machine's own address.
+Cargo records `network.public_ipv4` when it asked for one, for DNS and SPF; it never reaches
+a machine through it. Everything Cargo does to a machine goes over the mesh, and HTTP
+reaches a service through the proxy in front of it. Only mail is reached at the machine's
+own address, and only by the Internet.
 
 A machine that is `running` with no mesh address is marked **Broken** rather than waited on
 — Atlas says it is up, so an address that never came is a fault, not a delay. Cargo derives
@@ -98,9 +111,10 @@ surviving.
 
 ## Finding the base image — `GET /images?image_type=system`
 
-Cargo bakes on the Ubuntu System image. Atlas names an image by a generated id, so Cargo
-reads the enabled System images and takes the one whose `operating_system` and
-`operating_system_version` match, and whose `status` is `available`.
+Cargo bakes on the Ubuntu System image. Atlas names an image by a generated id, so Cargo asks
+for System images carrying the tags `purpose:base,os:Ubuntu,os_version:24.04` (`GET
+/images?image_type=system&tag=...&limit=100`), which Atlas matches and returns newest first,
+and takes the first whose `status` is `available`.
 
 A build stops with a clear error when no such image exists, rather than asking Atlas for a
 machine that cannot boot.

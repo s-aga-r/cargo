@@ -12,7 +12,7 @@ from frappe.utils import now_datetime
 
 from cargo.atlas_client import DEAD_STATES, MIB_PER_GB, RUNNING_STATE, AtlasNotFound
 from cargo.client_models import NodeSpec
-from cargo.ssh import create_keypair
+from cargo.ssh import HostKeyPin, create_keypair
 
 if TYPE_CHECKING:
 	from cargo.atlas_client import AtlasClient
@@ -37,10 +37,12 @@ class Machine(Document):
 		disk_size_gb: DF.Int
 		error: DF.SmallText | None
 		last_synced_at: DF.Datetime | None
+		public_ipv4: DF.Data | None
 		ram_gb: DF.Int
 		reference_doctype: DF.Link
 		reference_name: DF.DynamicLink
 		role: DF.Data
+		ssh_host_key: DF.SmallText | None
 		ssh_private_key: DF.Password | None
 		ssh_public_key: DF.SmallText | None
 		status: DF.Literal["Draft", "Pending", "Running", "Broken", "Terminated"]
@@ -63,6 +65,8 @@ class Machine(Document):
 		base_image: str,
 		zone: str = "",
 		ssh_keypair: tuple[str, str] | None = None,
+		public_ipv4: bool = False,
+		firewall: dict | None = None,
 	) -> Machine:
 		"""Record a machine and ask Atlas to build it, returning the row. Throws with the
 		row rolled back, so nothing is left claiming a VM that was never made."""
@@ -81,13 +85,20 @@ class Machine(Document):
 				"ssh_public_key": public_key,
 				"ssh_private_key": private_key,
 			}
-		).insert(ignore_permissions=True)
-
-		machine.vm_id = machine.build(spec, base_image)
+		)
+		frappe.db.savepoint("machine_request")
+		machine.insert(ignore_permissions=True)
+		try:
+			machine.vm_id = machine.build(spec, base_image, public_ipv4=public_ipv4, firewall=firewall)
+		except Exception:
+			frappe.db.rollback(save_point="machine_request")  # no row may claim a VM that was never made
+			raise
 		machine.record("Pending")
 		return machine
 
-	def build(self, spec: NodeSpec, base_image: str) -> str:
+	def build(
+		self, spec: NodeSpec, base_image: str, public_ipv4: bool = False, firewall: dict | None = None
+	) -> str:
 		"""Ask Atlas to build this machine, and return the id it goes by."""
 		from cargo.atlas_client import AtlasClient
 
@@ -101,11 +112,13 @@ class Machine(Document):
 				public_key=self.ssh_public_key,
 				hostname=self.name,
 				metadata={"role": self.role},
+				public_ipv4=public_ipv4,
+				firewall=firewall,
 			)
 		except Exception:
 			frappe.log_error(
 				title=f"{self.reference_name} could not add a {self.role} machine",
-				message=frappe.get_traceback(with_context=True),
+				message=frappe.get_traceback(with_context=False),
 			)
 			frappe.throw(_("Atlas would not build this machine. See the Error Log."))
 
@@ -142,7 +155,7 @@ class Machine(Document):
 		except Exception:
 			frappe.log_error(
 				title=f"Could not terminate {self.role} machine {self.name}",
-				message=frappe.get_traceback(with_context=True),
+				message=frappe.get_traceback(with_context=False),
 			)
 			self.record("Broken")
 			return False
@@ -171,11 +184,20 @@ class Machine(Document):
 		if state != RUNNING_STATE:
 			return self.record(self.status)
 
-		self.address = payload.get("network", {}).get("mesh_ipv6")
+		network = payload.get("network", {})
+		self.address = network.get("mesh_ipv6")
+		self.public_ipv4 = network.get("public_ipv4")
 		if not self.address:
 			return self.record("Broken", error="Atlas reported no mesh address")
 
 		return self.record("Running")
+
+	def host_key_pin(self) -> HostKeyPin:
+		"""How this machine is recognised over SSH: the key it first answered with, pinned."""
+		return HostKeyPin(self.ssh_host_key, self.pin_host_key)
+
+	def pin_host_key(self, line: str) -> None:
+		self.db_set("ssh_host_key", line, update_modified=False)
 
 	def record(self, status: MachineStatus, error: str | None = None) -> MachineStatus:
 		self.status = status

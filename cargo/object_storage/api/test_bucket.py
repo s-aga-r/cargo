@@ -21,7 +21,7 @@ from cargo.object_storage.api.bucket import (
 )
 from cargo.object_storage.client import Error
 from cargo.object_storage.doctype.bucket.bucket import Bucket
-from cargo.testing import use_test_settings
+from cargo.testing import as_request, signed_token, trusted_test_keys, use_test_settings
 
 BUCKET = "team-alpha"
 BUCKET_ID = "b1"
@@ -63,15 +63,17 @@ class IntegrationTestBucketApi(IntegrationTestCase):
 		garage.allow_bucket_key.return_value = {}
 
 		with (
-			patch("cargo.auth.authenticate_request", return_value=frappe._dict(aud="central-admin")),
+			trusted_test_keys(),
+			as_request(signed_token("bucket:*")),
 			patch.object(Bucket, "garage", garage),
 		):
 			yield garage
 
 	def existing_bucket(self):
+		# Set up inside a guest request, as the API runs, so permissions are stood down here.
 		return frappe.get_doc(
 			{"doctype": "Bucket", "bucket_name": BUCKET, "cluster": self.cluster.name}
-		).insert()
+		).insert(ignore_permissions=True)
 
 	def test_creating_hands_back_the_key_that_opens_the_bucket(self):
 		with self.caller() as garage:

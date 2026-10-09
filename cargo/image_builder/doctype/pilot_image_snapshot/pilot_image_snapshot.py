@@ -59,19 +59,20 @@ class PilotImageSnapshot(Document):
 
 		builder = Builder()
 		private_key = machine.get_password("ssh_private_key")
+		pin = machine.host_key_pin()
 		required = [row.app for row in self.required_apps]
 
 		if self.supports_app_toggle:
 			# Install all apps on site (if not already installed) and disable all apps except the required_apps
 			installed = [row.app for row in image.get_required_apps()]
 			others = [app for app in installed if app not in required]
-			builder.change_site_apps(machine.address, private_key, "install", installed)
+			builder.change_site_apps(machine.address, private_key, "install", installed, pin=pin)
 			if others:
-				builder.change_site_apps(machine.address, private_key, "disable", others)
+				builder.change_site_apps(machine.address, private_key, "disable", others, pin=pin)
 		else:
 			# Install the signup app and what it requires on site and ensure nothing else is installed.
-			builder.change_site_apps(machine.address, private_key, "install", required)
-			builder.change_site_apps(machine.address, private_key, "verify", ["frappe", *required])
+			builder.change_site_apps(machine.address, private_key, "install", required, pin=pin)
+			builder.change_site_apps(machine.address, private_key, "verify", ["frappe", *required], pin=pin)
 
 	def run_app_post_requisite(self, machine: MachineDoc, image: "PilotImage") -> None:
 		"""Take this snapshot's apps back off the site, so the next snapshot starts from a bare site."""
@@ -80,15 +81,16 @@ class PilotImageSnapshot(Document):
 
 		builder = Builder()
 		private_key = machine.get_password("ssh_private_key")
+		pin = machine.host_key_pin()
 		required = [row.app for row in self.required_apps]
 
 		if self.supports_app_toggle:
 			# Only this snapshot's apps are enabled, so disabling them disables all the apps on the site.
-			builder.change_site_apps(machine.address, private_key, "disable", required)
+			builder.change_site_apps(machine.address, private_key, "disable", required, pin=pin)
 		else:
 			# Uninstall the signup app and what it requires from site and ensure nothing else is installed.
-			builder.change_site_apps(machine.address, private_key, "uninstall", required)
-			builder.change_site_apps(machine.address, private_key, "verify", ["frappe"])
+			builder.change_site_apps(machine.address, private_key, "uninstall", required, pin=pin)
+			builder.change_site_apps(machine.address, private_key, "verify", ["frappe"], pin=pin)
 
 	def get_atlas_tags(self, image: "PilotImage") -> dict[str, str]:
 		"""The snapshot's specification, which is what a search at Atlas asks for."""
@@ -110,7 +112,9 @@ class PilotImageSnapshot(Document):
 	def take(self, machine: MachineDoc, image: "PilotImage") -> None:
 		"""Ask Atlas to photograph the machine as it is now. `complete_if_available` finishes
 		the snapshot once Atlas has made the image."""
-		Builder().flush_build_machine(machine.address, machine.get_password("ssh_private_key"))
+		Builder().flush_build_machine(
+			machine.address, machine.get_password("ssh_private_key"), pin=machine.host_key_pin()
+		)
 
 		title = f"{self.pilot_image}-{self.signup_app}" if self.signup_app else self.pilot_image
 		self.snapshot_id = machine.snapshot(title, self.get_atlas_tags(image))
@@ -150,7 +154,7 @@ class PilotImageSnapshot(Document):
 		except Exception:
 			frappe.log_error(
 				title=f"Could not delete Atlas image {self.snapshot_id} of {self.name}",
-				message=frappe.get_traceback(with_context=True),
+				message=frappe.get_traceback(with_context=False),
 			)
 			return False
 

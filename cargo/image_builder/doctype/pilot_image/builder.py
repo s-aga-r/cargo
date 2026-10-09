@@ -5,7 +5,7 @@ from collections.abc import Callable
 import frappe
 
 from cargo.client_models import BUILDER, NodeSpec
-from cargo.ssh import SshError, run_over_ssh, script
+from cargo.ssh import HostKeyPin, SshError, run_over_ssh, script
 
 PROVISION_SCRIPT = ("image_builder", "conf", "pilot", "provision.sh")
 PROVISION_TIMEOUT = 3600
@@ -35,14 +35,14 @@ class Builder:
 	"""Runs the provision script on a build machine. The machine itself is a `Machine`
 	record, which is what rents it, photographs it and lets it go."""
 
-	def wait_until_reachable(self, address: str, private_key: str) -> None:
+	def wait_until_reachable(self, address: str, private_key: str, pin: HostKeyPin | None = None) -> None:
 		"""Wait for the machine to answer, on the network first and then on SSH."""
 		if not self.is_answering_ping(address):
 			frappe.throw(
 				frappe._("{0} did not answer a ping within {1} seconds.").format(address, PING_TIMEOUT)
 			)
 
-		if not self.is_accepting_ssh(address, private_key):
+		if not self.is_accepting_ssh(address, private_key, pin):
 			frappe.throw(
 				frappe._("{0} answered a ping but not SSH within {1} seconds.").format(
 					address, SSH_READY_TIMEOUT
@@ -62,7 +62,7 @@ class Builder:
 
 			time.sleep(PING_INTERVAL)
 
-	def is_accepting_ssh(self, address: str, private_key: str) -> bool:
+	def is_accepting_ssh(self, address: str, private_key: str, pin: HostKeyPin | None = None) -> bool:
 		"""Whether sshd answered a trivial command before the deadline.
 
 		Only a failed command is retried. A missing ssh binary or an unusable key is not
@@ -70,7 +70,7 @@ class Builder:
 		deadline = time.monotonic() + SSH_READY_TIMEOUT
 		while True:
 			try:
-				run_over_ssh(address, "uptime", private_key, timeout=SSH_PROBE_TIMEOUT)
+				run_over_ssh(address, "uptime", private_key, timeout=SSH_PROBE_TIMEOUT, pin=pin)
 				return True
 			except SshError:
 				if time.monotonic() >= deadline:
@@ -84,6 +84,7 @@ class Builder:
 		private_key: str,
 		environment: dict[str, str],
 		on_output: Callable[[str], None] | None = None,
+		pin: HostKeyPin | None = None,
 	) -> str:
 		"""Run the provision script on the machine."""
 		return run_over_ssh(
@@ -92,14 +93,17 @@ class Builder:
 			private_key,
 			timeout=PROVISION_TIMEOUT,
 			on_output=on_output,
+			pin=pin,
 		)
 
-	def flush_build_machine(self, address: str, private_key: str) -> None:
+	def flush_build_machine(self, address: str, private_key: str, pin: HostKeyPin | None = None) -> None:
 		"""Write the page cache out. Atlas photographs a paused disk, and pausing flushes
 		nothing, so unwritten files land in the image empty."""
-		run_over_ssh(address, "sync", private_key, timeout=FLUSH_TIMEOUT)
+		run_over_ssh(address, "sync", private_key, timeout=FLUSH_TIMEOUT, pin=pin)
 
-	def change_site_apps(self, address: str, private_key: str, action: str, apps: list[str]) -> str:
+	def change_site_apps(
+		self, address: str, private_key: str, action: str, apps: list[str], pin: HostKeyPin | None = None
+	) -> str:
 		"""Install, disable or uninstall `apps` on the image's site, or verify it holds exactly
 		`apps`. `apps` is in install order."""
 		environment = {"ACTION": action, "APPS": " ".join(apps)}
@@ -108,4 +112,5 @@ class Builder:
 			script("image_builder", "conf", "pilot", "snapshot_apps.sh", environment=environment),
 			private_key,
 			timeout=1800,
+			pin=pin,
 		)

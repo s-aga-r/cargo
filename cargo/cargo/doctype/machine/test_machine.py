@@ -53,6 +53,13 @@ class IntegrationTestMachine(IntegrationTestCase):
 		self.assertEqual(status, "Running")
 		self.assertEqual(self.machine.address, MESH_ADDRESS)
 
+	def test_a_public_address_is_recorded_beside_the_mesh_one(self):
+		vm = running_vm()
+		vm["network"]["public_ipv4"] = "203.0.113.10"
+		self.machine.sync(self.client(vm))
+
+		self.assertEqual((self.machine.address, self.machine.public_ipv4), (MESH_ADDRESS, "203.0.113.10"))
+
 	def test_a_machine_still_booting_has_no_address_yet(self):
 		status = self.machine.sync(self.client({"current_state": "created"}))
 

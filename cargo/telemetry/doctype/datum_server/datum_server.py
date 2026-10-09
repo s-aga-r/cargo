@@ -10,22 +10,32 @@ from frappe import _
 from frappe.utils import cint
 
 from cargo.atlas_client import base_image_id
-from cargo.cargo.doctype.machine.machine import DEAD_STATES
 from cargo.client_models import TELEMETRY, NodeSpec
-from cargo.proxy_client import ProxyClient, ProxyError
+from cargo.proxy_client import ProxyError
+from cargo.service import (
+	REGION_HEADER,
+	REPORTED_STATUSES,
+	SOURCE,
+	SOURCE_HEADER,
+	TRUSTED_PROXIES,
+	configure_service_webhook,
+	mark,
+	publish_routes,
+	service_domain,
+	service_endpoint,
+	single_machine_sync,
+	wildcard_domain,
+)
 from cargo.ssh import OutputLog, run_over_ssh, script
 from cargo.workflow_engine.doctype.press_workflow.decorators import flow, task
 from cargo.workflow_engine.doctype.press_workflow.workflow_builder import WorkflowBuilder
 
 if typing.TYPE_CHECKING:
-	from frappe.integrations.doctype.webhook.webhook import Webhook
-
 	from cargo.cargo.doctype.cargo_settings.cargo_settings import CargoSettings
 
 CONF = ("telemetry", "conf", "datum", "install.sh")
 NGINX_CONF = ("telemetry", "conf", "nginx", "install.sh")
 DATUM_PORT = 8000
-TRUSTED_PROXIES = ("127.0.0.1", "::1", "fd00::/8")
 TELEMETRY_WRITE_SITE_NAME = "telemetry-svc"
 TELEMETRY_READ_SITE_NAME = "telemetry-read-svc"
 TELEMETRY_SITE_NAMES = (TELEMETRY_WRITE_SITE_NAME, TELEMETRY_READ_SITE_NAME)
@@ -36,10 +46,6 @@ MAX_PORT = 65535
 SECRET_LENGTH = 32
 USER_PASSWORDS = ("datum_user_password", "insights_user_password", "default_user_password")
 WEBHOOK_NAME = "datum_server"
-SOURCE_HEADER = "X-FC-Source"
-REGION_HEADER = "X-FC-Region"
-SOURCE = "cargo"
-REPORTED_STATUSES = ("Active", "Failed")
 
 
 class DatumServer(WorkflowBuilder):
@@ -162,19 +168,22 @@ class DatumServer(WorkflowBuilder):
 		from cargo.cargo.doctype.machine.machine import Machine
 
 		machine: Machine = frappe.get_doc("Machine", self.machine)
+		environment = self.install_environment()
 		with OutputLog(self, "setup_log", append=True) as log:
 			try:
 				run_over_ssh(
 					machine.address,
-					script(*CONF, environment=self.install_environment()),
+					script(*CONF, environment=environment),
 					machine.get_password("ssh_private_key"),
 					timeout=SETUP_TIMEOUT,
 					on_output=log.write,
+					pin=machine.host_key_pin(),
+					secrets=[value for key, value in environment.items() if "PASSWORD" in key],
 				)
 			except Exception:
 				frappe.log_error(
 					title=f"{self.name} failed to set up",
-					message=frappe.get_traceback(with_context=True),
+					message=frappe.get_traceback(with_context=False),
 				)
 				self.mark("Failed", "datum did not install. See the Setup Log.")
 				return False
@@ -195,11 +204,12 @@ class DatumServer(WorkflowBuilder):
 					machine.get_password("ssh_private_key"),
 					timeout=SETUP_TIMEOUT,
 					on_output=log.write,
+					pin=machine.host_key_pin(),
 				)
 			except Exception:
 				frappe.log_error(
 					title=f"{self.name} could not be routed to",
-					message=frappe.get_traceback(with_context=True),
+					message=frappe.get_traceback(with_context=False),
 				)
 				self.mark("Failed", "nginx did not come up. See the Setup Log.")
 				return False
@@ -217,29 +227,22 @@ class DatumServer(WorkflowBuilder):
 
 	@property
 	def wildcard_domain(self) -> str:
-		domain = frappe.db.get_single_value("Cargo Settings", "wildcard_domain", cache=True)
-		if not domain:
-			frappe.throw(_("Wildcard Domain must be set in Cargo Settings."))
-
-		return domain
+		return wildcard_domain()
 
 	@property
 	def proxy_domains(self) -> tuple[str, ...]:
-		return tuple(f"{site_name}.{self.wildcard_domain}" for site_name in TELEMETRY_SITE_NAMES)
+		return tuple(service_domain(site_name) for site_name in TELEMETRY_SITE_NAMES)
 
 	@property
 	def service_endpoint(self) -> str:
 		"""The URL pilots ship metrics and logs to, served by nginx on this host."""
-		return f"https://{TELEMETRY_WRITE_SITE_NAME}.{self.wildcard_domain}"
+		return service_endpoint(TELEMETRY_WRITE_SITE_NAME)
 
 	@task
 	def publish_proxy_routes(self) -> bool:
 		"""Point this region's telemetry domain at the host."""
 		try:
-			client = ProxyClient.from_settings()
-			machine_address = frappe.db.get_value("Machine", self.machine, "address")
-			for domain in self.proxy_domains:
-				client.map_domain(domain, machine_address)
+			publish_routes(self.proxy_domains, frappe.db.get_value("Machine", self.machine, "address"))
 		except (ProxyError, frappe.ValidationError) as error:
 			self.mark("Failed", _("Proxy route setup failed: {0}").format(str(error)))
 			return False
@@ -258,17 +261,10 @@ class DatumServer(WorkflowBuilder):
 			self.mark("Active")
 
 	def sync_machines(self) -> None:
-		"""What this host's machine settling means for it. Its state is already recorded;
-		`sync_pending_machines` calls this once it changes."""
-		status = frappe.db.get_value("Machine", self.machine, "status")
-
-		if status in DEAD_STATES:
-			return self.mark("Failed")
+		single_machine_sync(self)
 
 	def mark(self, status: str, error: str | None = None) -> None:
-		self.status = status
-		self.error = error
-		self.save()
+		mark(self, status, error)
 
 	def environment(self) -> dict[str, str]:
 		"""What datum runs on. The key set and the region come from Cargo Settings, which
@@ -301,42 +297,4 @@ class DatumServer(WorkflowBuilder):
 
 def configure_telemetry_webhook(server: DatumServer) -> None:
 	"""Point a Frappe Webhook at Central so this host reports its own status changes."""
-	settings: CargoSettings = frappe.get_cached_doc("Cargo Settings")
-	if not settings.central_webhook_url:
-		raise frappe.ValidationError(
-			_("Central has not enrolled this Cargo yet, so there is nowhere to report to.")
-		)
-
-	secret = settings.get_password("central_webhook_secret", raise_exception=True)
-	name = WEBHOOK_NAME
-	webhook: Webhook = (
-		frappe.get_doc("Webhook", name) if frappe.db.exists("Webhook", name) else frappe.new_doc("Webhook")
-	)
-	webhook.name = name
-	webhook.update(
-		{
-			"webhook_doctype": server.doctype,
-			"webhook_docevent": "on_update",
-			"request_url": settings.central_webhook_url,
-			"request_method": "POST",
-			"request_structure": "JSON",
-			"condition": f"doc.status in {REPORTED_STATUSES}",
-			"webhook_json": frappe.as_json(
-				{
-					"region": settings.region,
-					"region_id": settings.region_id,
-					"service": "telemetry",
-					"status": "{{ 'Available' if doc.status == 'Active' else 'Not Available' }}",
-					"service_endpoint": server.service_endpoint,
-				}
-			),
-			"webhook_headers": [
-				{"key": SOURCE_HEADER, "value": SOURCE},
-				{"key": REGION_HEADER, "value": settings.region},
-			],
-			"enable_security": True,
-			"webhook_secret": secret,
-			"enabled": settings.central_webhook_enabled,
-		}
-	)
-	webhook.save(ignore_permissions=True)
+	configure_service_webhook(server, "telemetry", WEBHOOK_NAME, server.service_endpoint)
