@@ -6,7 +6,7 @@ import frappe
 from frappe.tests import IntegrationTestCase, UnitTestCase
 
 from cargo.image_builder.doctype.pilot_image.pilot_image import PilotImage
-from cargo.ssh import HostKeyPin, OutputLog, live_output, run_over_ssh
+from cargo.ssh import MASK, HostKeyPin, Masker, OutputLog, SshError, live_output, run_over_ssh
 
 
 class TestOutputLog(IntegrationTestCase):
@@ -58,11 +58,13 @@ class FakeSsh:
 	"""Stands in for the ssh binary: notes the options it was given and writes the host key it
 	"saw" into the known-hosts file, as ssh does on first contact."""
 
+	output = ["ok\n"]
+	returncode = 0
+
 	def __init__(self, args, **kwargs) -> None:
 		self.args = args
 		self.stdin = io.StringIO()
-		self.stdout = iter(["ok\n"])
-		self.returncode = 0
+		self.stdout = iter(self.output)
 		hosts = next(a for a in args if a.startswith("UserKnownHostsFile=")).split("=", 1)[1]
 		with Path(hosts).open("a") as known:
 			known.write(f"{PRESENTED}\n")
@@ -108,3 +110,28 @@ class UnitTestHostKeyPinning(UnitTestCase):
 
 		self.assertEqual(ssh.option("StrictHostKeyChecking"), "accept-new")
 		self.assertFalse(Path(ssh.option("UserKnownHostsFile")).exists())
+
+
+class UnitTestMasking(UnitTestCase):
+	"""What a node prints may carry its secrets; nothing Cargo keeps may."""
+
+	def test_every_spelling_of_a_secret_is_hidden(self):
+		mask = Masker(['p@ss"word', "short"])
+		self.assertEqual(mask('plain p@ss"word here'), f"plain {MASK} here")
+		self.assertEqual(mask('json "p@ss\\"word" here'), f'json "{MASK}" here')
+		self.assertEqual(mask("shell 'p@ss\"word' here"), f"shell {MASK} here")
+		self.assertEqual(mask("short and shorter"), f"{MASK} and {MASK}er")
+
+	def test_output_and_the_error_tail_are_masked(self):
+		class Chatty(FakeSsh):
+			output = ["export TOKEN=hunter2\n", 'rejected {"secret":"hunter2"}\n']
+			returncode = 1
+
+		seen = []
+		with patch("cargo.ssh.subprocess.Popen", side_effect=lambda *a, **k: Chatty(*a, **k)):
+			with self.assertRaises(SshError) as refused:
+				run_over_ssh("fdaa:1::9", "x", "a-key", on_output=seen.append, secrets=["hunter2"])
+
+		self.assertNotIn("hunter2", "".join(seen))
+		self.assertNotIn("hunter2", str(refused.exception))
+		self.assertIn(MASK, seen[0])

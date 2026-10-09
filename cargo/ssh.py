@@ -1,3 +1,4 @@
+import json
 import os
 import shlex
 import stat
@@ -6,7 +7,7 @@ import tempfile
 import threading
 import time
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +33,7 @@ SSH_TIMEOUT = 600
 LOG_FLUSH_SECONDS = 3  # how often a running command's output is published
 LOG_CACHE_TTL = 15 * 60
 ERROR_TAIL = 3000  # characters of output kept when a command fails
+MASK = "***"
 OPTIONS = (
 	"-o",
 	"IdentitiesOnly=yes",
@@ -49,6 +51,33 @@ OPTIONS = (
 
 class SshError(RuntimeError):
 	"""A command run over SSH failed."""
+
+
+class Masker:
+	"""Hides every spelling of each secret in a line of output: as typed, as JSON would
+	escape it, and as a shell would quote it. Longest first, so a secret that contains another
+	is not left half shown."""
+
+	def __init__(self, secrets: Iterable[str]) -> None:
+		spellings: set[str] = set()
+		for secret in secrets:
+			if secret:
+				spellings.update(_spellings(str(secret)))
+		self.spellings = sorted(spellings, key=len, reverse=True)
+
+	def __call__(self, line: str) -> str:
+		for spelling in self.spellings:
+			line = line.replace(spelling, MASK)
+		return line
+
+
+def _spellings(secret: str) -> set[str]:
+	return {
+		secret,
+		json.dumps(secret)[1:-1],
+		json.dumps(secret, ensure_ascii=False)[1:-1],
+		shlex.quote(secret),
+	}
 
 
 class OutputLog:
@@ -168,11 +197,14 @@ def run_over_ssh(
 	timeout: int = SSH_TIMEOUT,
 	on_output: Callable[[str], None] | None = None,
 	pin: HostKeyPin | None = None,
+	secrets: Iterable[str] = (),
 ) -> str:
 	"""Pipe a script to ``bash -s`` and return what it printed, line by line as it arrives.
 
-	Without a `pin` the host key is taken on trust every time, which is only for a machine
-	nobody keeps a record of."""
+	Every spelling of `secrets` is masked before a line reaches `on_output`, the return value or
+	the error, so a script that echoes its environment or a command that quotes a rejected
+	object leaves nothing in a log. Without a `pin` the host key is taken on trust every time,
+	which is only for a machine nobody keeps a record of."""
 	if not key:
 		frappe.throw(_("No SSH private key, so {0} cannot be reached.").format(address))
 
@@ -208,12 +240,14 @@ def run_over_ssh(
 	# Popen has no timeout of its own once we are streaming, so a watchdog enforces it.
 	watchdog = threading.Timer(timeout, process.kill)
 	watchdog.start()
+	mask = Masker(secrets)
 	lines: list[str] = []
 
 	try:
 		process.stdin.write(script)
 		process.stdin.close()
 		for line in process.stdout:
+			line = mask(line)
 			lines.append(line)
 			if on_output:
 				on_output(line)

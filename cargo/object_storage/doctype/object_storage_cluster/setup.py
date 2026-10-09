@@ -74,7 +74,12 @@ class Setup(Client):
 	def run(self, machine: MachineRow, script: str, on_output: Callable[[str], None] | None = None) -> str:
 		"""Every command a node is given, streamed to `on_output` as it arrives."""
 		return run_over_ssh(
-			machine["address"], script, self.key_for(machine), on_output=on_output, pin=self.pin_for(machine)
+			machine["address"],
+			script,
+			self.key_for(machine),
+			on_output=on_output,
+			pin=self.pin_for(machine),
+			secrets=self.secrets.values(),
 		)
 
 	def pin_for(self, machine: MachineRow) -> HostKeyPin:

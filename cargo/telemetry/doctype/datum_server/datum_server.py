@@ -168,15 +168,17 @@ class DatumServer(WorkflowBuilder):
 		from cargo.cargo.doctype.machine.machine import Machine
 
 		machine: Machine = frappe.get_doc("Machine", self.machine)
+		environment = self.install_environment()
 		with OutputLog(self, "setup_log", append=True) as log:
 			try:
 				run_over_ssh(
 					machine.address,
-					script(*CONF, environment=self.install_environment()),
+					script(*CONF, environment=environment),
 					machine.get_password("ssh_private_key"),
 					timeout=SETUP_TIMEOUT,
 					on_output=log.write,
 					pin=machine.host_key_pin(),
+					secrets=[value for key, value in environment.items() if "PASSWORD" in key],
 				)
 			except Exception:
 				frappe.log_error(
