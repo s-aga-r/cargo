@@ -55,7 +55,7 @@ su postgres -c "pg_isready -h '$LISTEN_ADDRESS' -p '$PORT'" || { journalctl -u p
 PASSWORD_SQL="${ADMIN_PASSWORD//\'/\'\'}"
 ROLE_SQL=$(cat <<SQL
 SET log_min_error_statement TO panic;
-DO \$\$
+DO \$cargo\$
 BEGIN
 	IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$ADMIN_ROLE') THEN
 		EXECUTE format('CREATE ROLE %I LOGIN CREATEDB CREATEROLE PASSWORD %L', '$ADMIN_ROLE', '$PASSWORD_SQL');
@@ -63,7 +63,7 @@ BEGIN
 		EXECUTE format('ALTER ROLE %I LOGIN CREATEDB CREATEROLE PASSWORD %L', '$ADMIN_ROLE', '$PASSWORD_SQL');
 	END IF;
 END
-\$\$;
+\$cargo\$;
 SQL
 )
 printf '%s\n' "$ROLE_SQL" | su postgres -c "psql -v ON_ERROR_STOP=1 -q -p '$PORT'"
