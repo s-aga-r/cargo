@@ -6,16 +6,15 @@ import typing
 
 import frappe
 from frappe import _
-from frappe.utils.file_lock import LockTimeoutError
 
 from cargo.cargo.doctype.machine.machine import DEAD_MACHINE_STATES
 from cargo.client_models import GATEWAY, STORAGE, Role
 from cargo.spawn import (
-	has_required_settings,
+	MAX_SETUP_ATTEMPTS,
 	machine_status,
-	report,
-	spawn_config,
-	spawn_lock,
+	report_dead_machines,
+	retry_setup,
+	run_spawner,
 	validate_node_size,
 )
 
@@ -26,26 +25,13 @@ if typing.TYPE_CHECKING:
 
 CONFIG_KEY = "default_storage_cluster_config"
 LOCK_NAME = "object-storage-spawn"
-# Setting up again rents no machine, so a transient fault is worth another run. A broken
-# gateway is not, and three runs is where saying so beats trying again.
-MAX_SETUP_ATTEMPTS = 3
 
 
 def ensure_cluster() -> None:
 	"""Give this region one object storage cluster and keep it moving.
 
 	Off until `default_storage_cluster_config` is in site config. Scheduled in `hooks.py`."""
-	config = spawn_config(CONFIG_KEY, validate_config)
-	if not config or not has_required_settings():
-		return
-
-	try:
-		with spawn_lock(LOCK_NAME):
-			build_cluster(config)
-	except LockTimeoutError:
-		# Another run holds it and is already doing this work. Nothing here is urgent enough
-		# to wait for: the next run picks up wherever that one leaves the region.
-		return
+	run_spawner(CONFIG_KEY, LOCK_NAME, validate_config, build_cluster)
 
 
 def build_cluster(config: dict) -> None:
@@ -115,16 +101,7 @@ def missing_slots(cluster: ObjectStorageCluster, config: dict) -> list[Role]:
 
 def fill_machines(cluster: ObjectStorageCluster, config: dict) -> bool:
 	"""Ask Atlas for the machines this cluster is short of. True once it has them all."""
-	dead = [row.machine for row in cluster.machines if machine_status(row.machine) in DEAD_MACHINE_STATES]
-	if dead:
-		# Replacing a machine unattended is how a spawner runs away with money, and one that
-		# would not boot is worth a look. Release it and the next run asks Atlas for another.
-		report(
-			cluster,
-			_("{0} did not come up. Release it, and Cargo asks Atlas for another.").format(
-				", ".join(sorted(dead))
-			),
-		)
+	if report_dead_machines(cluster, [row.machine for row in cluster.machines]):
 		return False
 
 	for role in missing_slots(cluster, config):
@@ -161,10 +138,7 @@ def advance(cluster: ObjectStorageCluster) -> None:
 	if cluster.status != "Failed" or cluster.is_live:
 		return
 
-	# Spent. The record says how many runs it took and why the last one failed, so there is
-	# nothing to add: from here the cluster waits for a person.
-	if cluster.auto_setup_attempts >= MAX_SETUP_ATTEMPTS:
-		return
+	retry_setup(cluster)
 
-	cluster.db_set("auto_setup_attempts", cluster.auto_setup_attempts + 1)
-	cluster.setup()
+
+__all__ = ["CONFIG_KEY", "LOCK_NAME", "MAX_SETUP_ATTEMPTS", "ensure_cluster", "validate_config"]

@@ -6,12 +6,14 @@ import typing
 
 import frappe
 from frappe import _
+from frappe.utils.file_lock import LockTimeoutError
 from frappe.utils.synchronization import filelock
 
 from cargo.atlas_client import MAXIMUM_CPU_MILLICORES, MINIMUM_CPU_MILLICORES
+from cargo.cargo.doctype.machine.machine import DEAD_MACHINE_STATES
 
 if typing.TYPE_CHECKING:
-	from collections.abc import Callable
+	from collections.abc import Callable, Iterable
 	from contextlib import AbstractContextManager
 
 	from frappe.model.document import Document
@@ -20,6 +22,9 @@ if typing.TYPE_CHECKING:
 # service: they all rent from Atlas, answer under the region's domain, and report in.
 REQUIRED_SETTINGS = ("region", "wildcard_domain", "atlas_url", "central_url", "proxy_url")
 REQUIRED_SECRETS = ("atlas_token", "central_webhook_secret", "proxy_token")
+# Setting up again rents no machine, so a transient fault is worth another run. Three is
+# where saying so beats trying again.
+MAX_SETUP_ATTEMPTS = 3
 
 
 def has_required_settings() -> bool:
@@ -80,3 +85,46 @@ def validate_node_size(size: object, role: str) -> None:
 				role, MINIMUM_CPU_MILLICORES, MAXIMUM_CPU_MILLICORES
 			)
 		)
+
+
+def run_spawner(
+	config_key: str, lock_name: str, validate: Callable[[dict], None], build: Callable[[dict], None]
+) -> None:
+	"""One run of a spawner: off until its config is in site config, quiet until the host is
+	enrolled, and one at a time for this site."""
+	config = spawn_config(config_key, validate)
+	if not config or not has_required_settings():
+		return
+
+	try:
+		with spawn_lock(lock_name):
+			build(config)
+	except LockTimeoutError:
+		# Another run holds it and is already doing this work. Nothing here is urgent enough
+		# to wait for: the next run picks up wherever that one leaves the region.
+		return
+
+
+def report_dead_machines(doc: Document, machines: Iterable[str]) -> bool:
+	"""Say which machines never came up, once. True when there are any: a spawner stops
+	there, because replacing a machine unattended is how it runs away with money, and one
+	that would not boot is worth a look."""
+	dead = sorted(name for name in machines if machine_status(name) in DEAD_MACHINE_STATES)
+	if dead:
+		report(
+			doc,
+			_("{0} did not come up. Release it, and Cargo asks Atlas for another.").format(", ".join(dead)),
+		)
+
+	return bool(dead)
+
+
+def retry_setup(doc: Document) -> None:
+	"""Run a failed bring-up again, counted on the record, until the attempts are spent. From
+	there the record says how many runs it took and why the last one failed: it waits for a
+	person."""
+	if doc.auto_setup_attempts >= MAX_SETUP_ATTEMPTS:
+		return
+
+	doc.db_set("auto_setup_attempts", doc.auto_setup_attempts + 1)
+	doc.setup()

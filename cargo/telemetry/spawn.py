@@ -6,16 +6,14 @@ import typing
 
 import frappe
 from frappe import _
-from frappe.utils.file_lock import LockTimeoutError
 
-from cargo.cargo.doctype.machine.machine import DEAD_MACHINE_STATES
 from cargo.client_models import TELEMETRY
 from cargo.spawn import (
-	has_required_settings,
+	MAX_SETUP_ATTEMPTS,
 	machine_status,
-	report,
-	spawn_config,
-	spawn_lock,
+	report_dead_machines,
+	retry_setup,
+	run_spawner,
 	validate_node_size,
 )
 
@@ -25,26 +23,13 @@ if typing.TYPE_CHECKING:
 CONFIG_KEY = "default_telemetry_config"
 LOCK_NAME = "telemetry-spawn"
 DATUM_FIELDS = ("repository", "version")
-# Setting up again rents no machine, so a transient fault is worth another run. Three is
-# where saying so beats trying again.
-MAX_SETUP_ATTEMPTS = 3
 
 
 def ensure_telemetry() -> None:
 	"""Give this region one datum host and keep it moving.
 
 	Off until `default_telemetry_config` is in site config. Scheduled in `hooks.py`."""
-	config = spawn_config(CONFIG_KEY, validate_config)
-	if not config or not has_required_settings():
-		return
-
-	try:
-		with spawn_lock(LOCK_NAME):
-			build_server(config)
-	except LockTimeoutError:
-		# Another run holds it and is already doing this work. Nothing here is urgent enough
-		# to wait for: the next run picks up wherever that one leaves the region.
-		return
+	run_spawner(CONFIG_KEY, LOCK_NAME, validate_config, build_server)
 
 
 def validate_config(config: dict) -> None:
@@ -96,18 +81,7 @@ def provision(server: DatumServer, config: dict) -> None:
 def fill_machine(server: DatumServer, config: dict) -> bool:
 	"""Ask Atlas for the machine this host runs on. True once it has one."""
 	if server.machine:
-		if machine_status(server.machine) in DEAD_MACHINE_STATES:
-			# Replacing a machine unattended is how a spawner runs away with money, and one
-			# that would not boot is worth a look.
-			report(
-				server,
-				_("{0} did not come up. Release it, and Cargo asks Atlas for another.").format(
-					server.machine
-				),
-			)
-			return False
-
-		return True
+		return not report_dead_machines(server, [server.machine])
 
 	size = config[TELEMETRY]
 	try:
@@ -135,10 +109,7 @@ def advance(server: DatumServer) -> None:
 	if server.status != "Failed":
 		return
 
-	# Spent. The record says how many runs it took and why the last one failed, so there is
-	# nothing to add: from here the host waits for a person.
-	if server.auto_setup_attempts >= MAX_SETUP_ATTEMPTS:
-		return
+	retry_setup(server)
 
-	server.db_set("auto_setup_attempts", server.auto_setup_attempts + 1)
-	server.setup()
+
+__all__ = ["CONFIG_KEY", "DATUM_FIELDS", "MAX_SETUP_ATTEMPTS", "ensure_telemetry", "validate_config"]
