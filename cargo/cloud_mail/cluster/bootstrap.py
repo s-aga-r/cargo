@@ -1,4 +1,5 @@
-"""Node lifecycle: bootstrap completion, health, draining and upgrades."""
+"""Node lifecycle: what the provisioning scripts are given, bootstrap completion, health,
+draining and upgrades."""
 
 from typing import TYPE_CHECKING
 
@@ -11,11 +12,132 @@ from cargo.cloud_mail.stalwart import forget_sessions, get_client, has_credentia
 from cargo.cloud_mail.stalwart.credentials import Credential
 from cargo.cloud_mail.stalwart.errors import StalwartError, StalwartUnauthorizedError
 from cargo.cloud_mail.utils import log_exception
+from cargo.service import MESH_NETWORK
+from cargo.ssh import OutputLog, run_over_ssh, script
 
 if TYPE_CHECKING:
 	from frappe.model.document import Document
 
 BOOTSTRAP_DEADLINE_MINUTES = 45
+SCRIPTS = ("cloud_mail", "conf", "stalwart")
+INSTALL_TIMEOUT = 20 * 60
+BOOTSTRAP_TIMEOUT = 20 * 60
+
+
+# --- what the scripts are given ---------------------------------------------------------------
+
+
+def install_environment(server: Document) -> dict:
+	"""What install.sh needs on a node or a gateway."""
+	cluster = server.get_cluster()
+	settings = frappe.get_cached_doc("Mail Settings")
+	return {
+		"STALWART_VERSION": server.get("stalwart_version") or cluster.stalwart_version,
+		"STALWART_URL_TEMPLATE": plan.STALWART_URL_TEMPLATE,
+		"STALWART_CLI_VERSION": plan.STALWART_CLI_VERSION,
+		"STALWART_CLI_URL_TEMPLATE": plan.STALWART_CLI_URL_TEMPLATE,
+		"SYSTEMD_UNIT": plan.systemd_unit(),
+		"RECOVERY_PORT": plan.BOOTSTRAP_PORT,
+		"FIREWALL_PORTS": " ".join(str(port) for port in plan.FIREWALL_PORTS),
+		"MESH_NETWORK": MESH_NETWORK,
+		"USE_UFW": int(bool(settings.host_firewall)),
+	}
+
+
+def wait_ports(node: Document) -> str:
+	return "25 443" if serves_clients(node) else ""
+
+
+def bootstrap_environment(node: Document) -> tuple[dict, list[str]]:
+	"""What bootstrap.sh needs, and every secret in it, for the masker."""
+	cluster = node.get_cluster()
+	bootstrap_plan = plan.bootstrap_plan(cluster)
+	recovery_plan = plan.recovery_plan(cluster)
+	environment = {
+		"RECOVERY_PORT": plan.BOOTSTRAP_PORT,
+		"ADMIN_USER": cluster.admin_username,
+		"ADMIN_PASSWORD": cluster.get_password("admin_password"),
+		"PLAN_MARKER": plan.marker(recovery_plan),
+		"CONFIG_VERSION": cluster.config_version or 0,
+		"ENV_NORMAL": plan.render_env(plan.node_env(node, "normal")),
+		"ENV_BOOTSTRAP": plan.render_env(plan.node_env(node, "bootstrap")),
+		"ENV_RECOVERY": plan.render_env(plan.node_env(node, "recovery")),
+		"CONFIG_JSON": frappe.as_json(plan.node_config(cluster)),
+		"BOOTSTRAP_NDJSON": plan.to_ndjson(bootstrap_plan),
+		"DEFAULTS_NDJSON": plan.to_ndjson(plan.defaults_plan()),
+		"CLUSTER_NDJSON": plan.to_ndjson(recovery_plan),
+		"WAIT_PORTS": wait_ports(node),
+	}
+	secrets = [
+		environment["ADMIN_PASSWORD"],
+		*plan.secret_strings(bootstrap_plan),
+		*plan.secret_strings(recovery_plan),
+	]
+	return environment, secrets
+
+
+def configure_environment(node: Document) -> tuple[dict, list[str]]:
+	"""What configure.sh needs: the store connection and the runtime environment."""
+	cluster = node.get_cluster()
+	config = plan.node_config(cluster)
+	environment = {
+		"CONFIG_JSON": frappe.as_json(config),
+		"ENV_NORMAL": plan.render_env(plan.node_env(node, "normal")),
+		"WAIT_PORTS": wait_ports(node),
+	}
+	return environment, plan.secret_strings([{"value": config}])
+
+
+def needs_bootstrap(node: Document) -> bool:
+	"""Whether this node brings the data store up, or joins a cluster that is already up.
+
+	The first node of a Pending or Failed cluster bootstraps and becomes the bootstrap node;
+	a cluster whose bootstrap node is being provisioned again bootstraps again, which skips
+	whatever is already in place. A node joining an Active cluster is configured."""
+	cluster = node.get_cluster()
+	first = cluster.status in ("Pending", "Failed") and (
+		not cluster.bootstrap_node or cluster.bootstrap_node == node.name
+	)
+	if first or (cluster.status == "Bootstrapping" and node.is_bootstrap_node):
+		if not serves_clients(node):
+			frappe.throw(_("The first node must serve clients; pick the full or frontend role."))
+		return True
+	if cluster.status == "Active":
+		return False
+	frappe.throw(_("The cluster is still bootstrapping; provision more nodes once it is active."))
+
+
+def start_bootstrap(node: Document) -> None:
+	"""Record that this node brings the cluster up, and freeze the plan it does it with."""
+	cluster = node.get_cluster()
+	node.db_set("is_bootstrap_node", 1, update_modified=False)
+	cluster.db_set({"status": "Bootstrapping", "bootstrap_node": node.name}, update_modified=False)
+	cluster.bump_config_version(plan.cluster_plan(cluster))
+
+
+def run_script(
+	server: Document, name: str, environment: dict, secrets: list[str], timeout: int
+) -> str | None:
+	"""Run one of the Stalwart scripts on a server's machine, streaming into its setup log.
+	Returns the output, or None once the failure is on the record."""
+	machine = frappe.get_doc("Machine", server.machine)
+	with OutputLog(server, "setup_log", append=True) as log:
+		try:
+			return run_over_ssh(
+				machine.address,
+				script(*SCRIPTS, name, environment=environment),
+				machine.get_password("ssh_private_key"),
+				timeout=timeout,
+				on_output=log.write,
+				pin=machine.host_key_pin(),
+				secrets=secrets,
+			)
+		except Exception:
+			frappe.log_error(
+				title=f"{server.name}: {name} failed", message=frappe.get_traceback(with_context=False)
+			)
+			server.set_status("Failed", _("{0} failed. See the Setup Log.").format(name))
+			return None
 
 
 # --- provisioning ---------------------------------------------------------------------------
@@ -53,9 +175,19 @@ def after_provision(node: Document) -> None:
 	check_node(node)
 
 
-def after_upgrade(node: Document) -> None:
+def installed_version_from(output: str) -> str | None:
+	"""The version `stalwart --version` printed as the last line of upgrade.sh and rollback.sh."""
+	lines = output.strip().splitlines()
+	if not lines or not lines[-1].split():
+		return None
+	version = lines[-1].split()[-1]
+	return version if version.startswith("v") else f"v{version}"
+
+
+def after_upgrade(node: Document, version: str | None = None) -> None:
+	"""The node restarted on another version: its deadline starts afresh and it is checked again."""
 	node.db_set(
-		{"installed_version": node.get_cluster().stalwart_version, "provisioned_at": now()},
+		{"installed_version": version or node.get_cluster().stalwart_version, "provisioned_at": now()},
 		update_modified=False,
 	)
 	node.set_status("Provisioned")

@@ -8,6 +8,7 @@
   "general_section",
   "skip_domain_verification",
   "verify_stalwart_tls",
+  "host_firewall",
   "jobs_section",
   "column_break_jobs",
   "dmarc_report_retention_days",
@@ -41,6 +42,13 @@
    "fieldname": "verify_stalwart_tls",
    "fieldtype": "Check",
    "label": "Verify Stalwart TLS"
+  },
+  {
+   "default": "0",
+   "description": "Also write ufw rules on each mail machine. Only for a region whose Atlas cannot change a running machine's firewall.",
+   "fieldname": "host_firewall",
+   "fieldtype": "Check",
+   "label": "Host Firewall"
   },
   {
    "fieldname": "jobs_section",
@@ -97,7 +105,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-06 14:10:00.000000",
+ "modified": "2026-10-09 12:31:41.816826",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Mail Settings",

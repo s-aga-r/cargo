@@ -5,6 +5,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from cargo.cloud_mail.cluster import dns, plan
+from cargo.cloud_mail.doctype.stalwart_node.stalwart_node import StalwartNode
 from cargo.cloud_mail.tests.fixtures import (
 	ROOT_DOMAIN,
 	configure_settings,
@@ -139,7 +140,8 @@ class TestStalwartCluster(IntegrationTestCase):
 
 		node.set_status("Pending")
 		machine.db_set("public_ipv4", "203.0.113.7")
-		node.sync_machines()
+		with patch.object(StalwartNode, "start_provisioning"):  # provisioning has its own tests
+			node.sync_machines()
 		node.reload()
 		self.assertEqual(node.ipv4_address, "203.0.113.7")
 		self.assertEqual(

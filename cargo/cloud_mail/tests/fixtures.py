@@ -70,6 +70,10 @@ def remove_cluster(name: str) -> None:
 		# A node's machine links back to it; nothing else holds the row, so it goes first.
 		frappe.db.delete("Machine", {"reference_doctype": "Stalwart Node", "reference_name": ["in", nodes]})
 	frappe.db.delete("DNS Record", {"managed_by": ["in", [*nodes, name]]})
+	for workflow in frappe.get_all(
+		"Press Workflow", {"linked_doctype": "Stalwart Node", "linked_docname": ["in", nodes]}, pluck="name"
+	):
+		frappe.delete_doc("Press Workflow", workflow, force=True, ignore_permissions=True)
 	for node in nodes:
 		frappe.delete_doc("Stalwart Node", node, force=True, ignore_permissions=True, ignore_on_trash=True)
 	frappe.delete_doc("Stalwart Cluster", name, force=True, ignore_permissions=True, ignore_on_trash=True)

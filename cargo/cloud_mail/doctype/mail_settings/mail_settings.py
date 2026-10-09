@@ -23,6 +23,7 @@ class MailSettings(Document):
 
 		disabled_domain_retention_days: DF.Int
 		dmarc_report_retention_days: DF.Int
+		host_firewall: DF.Check
 		ownership_miss_limit: DF.Int
 		sign_with_ed25519: DF.Check
 		skip_domain_verification: DF.Check

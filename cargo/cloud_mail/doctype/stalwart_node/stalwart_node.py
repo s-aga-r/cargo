@@ -15,11 +15,13 @@ from cargo.cloud_mail.cluster import bootstrap, dns, naming
 from cargo.cloud_mail.cluster.firewall import node_firewall
 from cargo.cloud_mail.utils import log_exception
 from cargo.dns.resolver import verify_ptr_record
+from cargo.workflow_engine.doctype.press_workflow.decorators import flow, task
+from cargo.workflow_engine.doctype.press_workflow.workflow_builder import WorkflowBuilder
 
 REMOVABLE_STATUSES = ("Pending", "Failed", "Disabled")
 
 
-class StalwartNode(Document):
+class StalwartNode(WorkflowBuilder):
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
 
@@ -43,6 +45,7 @@ class StalwartNode(Document):
 		machine: DF.Link | None
 		node_id: DF.Int
 		provisioned_at: DF.Datetime | None
+		setup_log: DF.Code | None
 		ptr_verified: DF.Check
 		role: DF.Literal["full", "frontend", "outbound"]
 		location: DF.Data | None
@@ -114,6 +117,7 @@ class StalwartNode(Document):
 
 		bootstrap.forget_node(self)
 		dns.delete_node_records(self)
+		super().on_trash()
 
 	def after_delete(self) -> None:
 		dns.sync_spf_record(self.get_cluster())
@@ -166,6 +170,137 @@ class StalwartNode(Document):
 		if self.ipv4_address != machine.public_ipv4:
 			self.ipv4_address = machine.public_ipv4
 			self.save(ignore_permissions=True)
+		if self.status == "Pending" and self.enabled:
+			self.start_provisioning()
+
+	# --- provisioning -------------------------------------------------------------
+
+	@frappe.whitelist()
+	def provision(self) -> None:
+		frappe.only_for("System Manager")
+		self.start_provisioning()
+
+	def start_provisioning(self) -> None:
+		"""Install Stalwart on this node's machine and bring it into the cluster."""
+		if not self.enabled:
+			frappe.throw(_("Enable the node first."))
+		if not self.machine or frappe.db.get_value("Machine", self.machine, "status") != "Running":
+			frappe.throw(_("The node's machine must be running."))
+		if not self.ipv4_address:
+			frappe.throw(_("The node has no public address yet."))
+		bootstrap.needs_bootstrap(self)  # refused now rather than half-way through
+		self.set_status("Provisioning")
+		self._provision.run_as_workflow()
+
+	@flow
+	def _provision(self) -> None:
+		if not self.install():
+			return
+		if not self.bring_up():
+			return
+		self.record_provisioned()
+
+	@task(queue="long", timeout=3 * bootstrap.INSTALL_TIMEOUT)
+	def install(self) -> bool:
+		return (
+			bootstrap.run_script(
+				self, "install.sh", bootstrap.install_environment(self), [], bootstrap.INSTALL_TIMEOUT
+			)
+			is not None
+		)
+
+	@task(queue="long", timeout=3 * bootstrap.BOOTSTRAP_TIMEOUT)
+	def bring_up(self) -> bool:
+		"""Bootstrap the store from this node, or join a cluster that is already up."""
+		if bootstrap.needs_bootstrap(self):
+			bootstrap.start_bootstrap(self)
+			environment, secrets = bootstrap.bootstrap_environment(self)
+			name = "bootstrap.sh"
+		else:
+			environment, secrets = bootstrap.configure_environment(self)
+			name = "configure.sh"
+		return bootstrap.run_script(self, name, environment, secrets, bootstrap.BOOTSTRAP_TIMEOUT) is not None
+
+	@task
+	def record_provisioned(self) -> None:
+		bootstrap.after_provision(self)
+
+	@frappe.whitelist()
+	def upgrade(self) -> None:
+		frappe.only_for("System Manager")
+		if not self.enabled:
+			frappe.throw(_("Enable the node first."))
+		self._upgrade.run_as_workflow()
+
+	@flow
+	def _upgrade(self) -> None:
+		self.take_out_of_ingress()
+		if not self.install():
+			return
+		version = self.restart_on_installed_version()
+		if version is None:
+			return
+		self.record_upgraded(version)
+
+	@task
+	def take_out_of_ingress(self) -> None:
+		if self.status == "Active":
+			bootstrap.drain_node(self)
+
+	@task(queue="long", timeout=3 * bootstrap.BOOTSTRAP_TIMEOUT)
+	def restart_on_installed_version(self) -> str | None:
+		"""The version the node came back on, or None once the failure is on the record."""
+		environment = {"WAIT_PORTS": bootstrap.wait_ports(self)}
+		output = bootstrap.run_script(self, "upgrade.sh", environment, [], bootstrap.BOOTSTRAP_TIMEOUT)
+		if output is None:
+			return None
+		return bootstrap.installed_version_from(output) or self.get_cluster().stalwart_version
+
+	@task
+	def record_upgraded(self, version: str | None = None) -> None:
+		bootstrap.after_upgrade(self, version)
+
+	@frappe.whitelist()
+	def rollback(self) -> None:
+		frappe.only_for("System Manager")
+		self._rollback.run_as_workflow()
+
+	@flow
+	def _rollback(self) -> None:
+		self.take_out_of_ingress()
+		version = self.restart_on_previous_version()
+		if version is None:
+			return
+		self.record_upgraded(version)
+
+	@task(queue="long", timeout=3 * bootstrap.BOOTSTRAP_TIMEOUT)
+	def restart_on_previous_version(self) -> str | None:
+		environment = {"WAIT_PORTS": bootstrap.wait_ports(self)}
+		output = bootstrap.run_script(self, "rollback.sh", environment, [], bootstrap.BOOTSTRAP_TIMEOUT)
+		if output is None:
+			return None
+		return bootstrap.installed_version_from(output) or "unknown"
+
+	@frappe.whitelist()
+	def reconfigure(self) -> None:
+		"""Rewrite the store connection and restart, after a store credential or address changed."""
+		frappe.only_for("System Manager")
+		self._reconfigure.run_as_workflow()
+
+	@flow
+	def _reconfigure(self) -> None:
+		self.take_out_of_ingress()
+		if not self.rewrite_store_connection():
+			return
+		self.record_upgraded(self.installed_version)
+
+	@task(queue="long", timeout=3 * bootstrap.BOOTSTRAP_TIMEOUT)
+	def rewrite_store_connection(self) -> bool:
+		environment, secrets = bootstrap.configure_environment(self)
+		return (
+			bootstrap.run_script(self, "configure.sh", environment, secrets, bootstrap.BOOTSTRAP_TIMEOUT)
+			is not None
+		)
 
 	# --- actions --------------------------------------------------------------
 

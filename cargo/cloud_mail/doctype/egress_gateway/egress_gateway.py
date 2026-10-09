@@ -9,14 +9,16 @@ from frappe.utils import cint, now
 from cargo.atlas_client import base_image_id
 from cargo.cargo.doctype.machine.machine import DEAD_MACHINE_STATES, Machine
 from cargo.client_models import MAIL, NodeSpec
-from cargo.cloud_mail.cluster import dns, egress, naming, plan
+from cargo.cloud_mail.cluster import bootstrap, dns, egress, naming, plan
 from cargo.cloud_mail.cluster.firewall import gateway_firewall
 from cargo.cloud_mail.doctype.stalwart_node.stalwart_node import validate_ip
 from cargo.cloud_mail.stalwart import get_admin_client, get_client
 from cargo.cloud_mail.utils import dkim_algorithms, log_exception, validate_version
+from cargo.workflow_engine.doctype.press_workflow.decorators import flow, task
+from cargo.workflow_engine.doctype.press_workflow.workflow_builder import WorkflowBuilder
 
 
-class EgressGateway(Document):
+class EgressGateway(WorkflowBuilder):
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
 
@@ -41,6 +43,7 @@ class EgressGateway(Document):
 		last_error: DF.SmallText | None
 		machine: DF.Link | None
 		provisioned_at: DF.Datetime | None
+		setup_log: DF.Code | None
 		stalwart_version: DF.Data | None
 		location: DF.Data | None
 		title: DF.Data | None
@@ -94,6 +97,7 @@ class EgressGateway(Document):
 		if frappe.db.exists("Egress IP Pool Address", {"gateway": self.name}):
 			frappe.throw(_("Remove this gateway's addresses from every pool first."))
 		dns.delete_gateway_records(self)
+		super().on_trash()
 
 	# --- helpers ------------------------------------------------------------------
 
@@ -190,6 +194,56 @@ class EgressGateway(Document):
 		if self.ipv4_address != machine.public_ipv4:
 			self.ipv4_address = machine.public_ipv4
 			self.save(ignore_permissions=True)
+		if self.status == "Pending" and self.enabled:
+			self.start_provisioning()
+
+	# --- provisioning -------------------------------------------------------------------
+
+	@frappe.whitelist()
+	def provision(self) -> None:
+		frappe.only_for("System Manager")
+		self.start_provisioning()
+
+	def start_provisioning(self) -> None:
+		if not self.enabled:
+			frappe.throw(_("Enable the gateway first."))
+		if not self.machine or frappe.db.get_value("Machine", self.machine, "status") != "Running":
+			frappe.throw(_("The gateway's machine must be running."))
+		self.bump_config_version(egress.gateway_plan(self))
+		self.set_status("Provisioning")
+		self._provision.run_as_workflow()
+
+	@flow
+	def _provision(self) -> None:
+		if not self.install():
+			return
+		if not self.bring_up():
+			return
+		self.record_provisioned()
+
+	@task(queue="long", timeout=3 * bootstrap.INSTALL_TIMEOUT)
+	def install(self) -> bool:
+		environment = {
+			**bootstrap.install_environment(self),
+			"FIREWALL_PORTS": "443",
+			"RELAY_PORTS": " ".join(str(pool.relay_port) for pool in self.pools()),
+			"RELAY_SOURCES": " ".join(egress.node_addresses(self.get_cluster())),
+		}
+		return (
+			bootstrap.run_script(self, "install.sh", environment, [], bootstrap.INSTALL_TIMEOUT) is not None
+		)
+
+	@task(queue="long", timeout=3 * bootstrap.BOOTSTRAP_TIMEOUT)
+	def bring_up(self) -> bool:
+		environment, secrets = egress.bootstrap_environment(self)
+		return (
+			bootstrap.run_script(self, "bootstrap.sh", environment, secrets, bootstrap.BOOTSTRAP_TIMEOUT)
+			is not None
+		)
+
+	@task
+	def record_provisioned(self) -> None:
+		egress.after_gateway_provision(self)
 
 	# --- actions --------------------------------------------------------------------
 

@@ -29,7 +29,8 @@
   "last_health_at",
   "consecutive_failures",
   "drained_by",
-  "last_error"
+  "last_error",
+  "setup_log"
  ],
  "fields": [
   {
@@ -208,6 +209,12 @@
    "fieldtype": "Small Text",
    "label": "Last Error",
    "read_only": 1
+  },
+  {
+   "fieldname": "setup_log",
+   "fieldtype": "Code",
+   "label": "Setup Log",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
@@ -218,7 +225,7 @@
    "link_fieldname": "managed_by"
   }
  ],
- "modified": "2026-10-09 12:24:13.225678",
+ "modified": "2026-10-09 12:31:41.817094",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Stalwart Node",

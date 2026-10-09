@@ -30,6 +30,7 @@
   "column_break_state",
   "last_config_sync_at",
   "last_error",
+  "setup_log",
   "config_plan_section",
   "config_plan"
  ],
@@ -208,6 +209,12 @@
    "read_only": 1
   },
   {
+   "fieldname": "setup_log",
+   "fieldtype": "Code",
+   "label": "Setup Log",
+   "read_only": 1
+  },
+  {
    "collapsible": 1,
    "depends_on": "eval: doc.config_plan",
    "fieldname": "config_plan_section",
@@ -231,7 +238,7 @@
    "link_fieldname": "managed_by"
   }
  ],
- "modified": "2026-10-09 12:24:13.226430",
+ "modified": "2026-10-09 12:31:41.817254",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Egress Gateway",

@@ -412,6 +412,34 @@ def gateway_env(gateway: Document, mode: str = "normal") -> dict[str, str]:
 	return env
 
 
+def bootstrap_environment(gateway: Document) -> tuple[dict, list[str]]:
+	"""What bootstrap.sh needs on a gateway, and every secret in it."""
+	bootstrap_plan = gateway_bootstrap_plan(gateway)
+	recovery_plan = gateway_recovery_plan(gateway)
+	relay_ports = sorted({pool.relay_port for pool in gateway.pools()})
+	environment = {
+		"RECOVERY_PORT": plan.BOOTSTRAP_PORT,
+		"ADMIN_USER": gateway.admin_username,
+		"ADMIN_PASSWORD": gateway.get_password("admin_password"),
+		"PLAN_MARKER": plan.marker(recovery_plan),
+		"CONFIG_VERSION": gateway.config_version or 0,
+		"ENV_NORMAL": plan.render_env(gateway_env(gateway, "normal")),
+		"ENV_BOOTSTRAP": plan.render_env(gateway_env(gateway, "bootstrap")),
+		"ENV_RECOVERY": plan.render_env(gateway_env(gateway, "recovery")),
+		"CONFIG_JSON": frappe.as_json(gateway.get_store("data_store").config),
+		"BOOTSTRAP_NDJSON": plan.to_ndjson(bootstrap_plan),
+		"DEFAULTS_NDJSON": plan.to_ndjson(gateway_defaults_plan()),
+		"CLUSTER_NDJSON": plan.to_ndjson(recovery_plan),
+		"WAIT_PORTS": " ".join(str(port) for port in (443, *relay_ports)),
+	}
+	secrets = [
+		environment["ADMIN_PASSWORD"],
+		*plan.secret_strings(bootstrap_plan),
+		*plan.secret_strings(recovery_plan),
+	]
+	return environment, secrets
+
+
 def after_gateway_provision(gateway: Document) -> None:
 	gateway.db_set(
 		{"status": "Provisioned", "provisioned_at": now(), "installed_version": gateway.stalwart_version},

@@ -22,6 +22,14 @@ if TYPE_CHECKING:
 	from frappe.model.document import Document
 
 STALWART_VERSION = "v0.16.20"
+STALWART_URL_TEMPLATE = (
+	"https://github.com/stalwartlabs/stalwart/releases/download/{version}/stalwart-{target}.tar.gz"
+)
+# The gnu CLI build needs a newer glibc than some bases ship; the musl build is static.
+STALWART_CLI_VERSION = "v1.0.12"
+STALWART_CLI_URL_TEMPLATE = (
+	"https://github.com/stalwartlabs/cli/releases/download/{version}/stalwart-cli-{target}.tar.xz"
+)
 SPAM_FILTER_RULES_VERSION = "v3.0.1"
 ACME_DIRECTORY_URL = "https://acme-v02.api.letsencrypt.org/directory"
 BOOTSTRAP_PORT = 8080
