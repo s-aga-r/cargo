@@ -229,8 +229,10 @@ def check_node(node: Document) -> bool:
 
 
 def activate_node(node: Document) -> None:
+	"""Into ingress: a node serving is held out by nobody."""
 	if not node.enabled:
 		frappe.throw(_("Enable the node first."))
+	node.db_set("drained_by", None, update_modified=False)
 	node.set_status("Active")
 	dns.sync_node_records(node, include_ingress=serves_clients(node))
 	dns.sync_spf_record(node.get_cluster())
@@ -391,10 +393,12 @@ def _set_default_certificate(cluster: Document, client) -> None:
 # --- draining / removal -----------------------------------------------------------------------
 
 
-def drain_node(node: Document) -> None:
-	"""Takes the node out of the ingress round-robin; Stalwart keeps running on it."""
+def drain_node(node: Document, drained_by: str = "Operator") -> None:
+	"""Takes the node out of the ingress round-robin; Stalwart keeps running on it. Who drained
+	it decides who may put it back: Health restores only its own drains."""
 
 	dns.sync_node_records(node, include_ingress=False)
+	node.db_set("drained_by", drained_by, update_modified=False)
 	node.set_status("Draining" if node.status == "Active" else "Disabled")
 	dns.sync_spf_record(node.get_cluster())
 
@@ -402,9 +406,19 @@ def drain_node(node: Document) -> None:
 def restore_node(node: Document) -> None:
 	if not node.enabled:
 		frappe.throw(_("Enable the node first."))
-	node.db_set("provisioned_at", now(), update_modified=False)  # the health deadline starts afresh
+	# The health deadline starts afresh, and nobody holds the node out any more.
+	node.db_set({"provisioned_at": now(), "drained_by": None}, update_modified=False)
 	node.set_status("Provisioned")
 	check_node(node)
+
+
+def fail_dead_node(node: Document, machine_status: str) -> None:
+	"""A node whose machine Atlas reports gone: out of ingress and SPF at once, since its
+	address can be reissued to anyone, and its lease released. Replacing it is the operator's."""
+	dns.sync_node_records(node, include_ingress=False)
+	node.set_status("Failed", f"{node.machine} is {machine_status}")
+	dns.sync_spf_record(node.get_cluster())
+	forget_node(node)
 
 
 def forget_node(node: Document) -> None:

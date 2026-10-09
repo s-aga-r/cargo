@@ -27,6 +27,7 @@ class MailSettings(Document):
 		ownership_miss_limit: DF.Int
 		require_domain_grant: DF.Check
 		sign_with_ed25519: DF.Check
+		soak_minutes: DF.Int
 		skip_domain_verification: DF.Check
 		tls_report_retention_days: DF.Int
 		verify_stalwart_tls: DF.Check

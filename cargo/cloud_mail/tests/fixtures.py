@@ -87,7 +87,12 @@ def remove_cluster(name: str) -> None:
 		frappe.db.delete("Machine", {"reference_doctype": "Stalwart Node", "reference_name": ["in", nodes]})
 	frappe.db.delete("DNS Record", {"managed_by": ["in", [*nodes, name]]})
 	for workflow in frappe.get_all(
-		"Press Workflow", {"linked_doctype": "Stalwart Node", "linked_docname": ["in", nodes]}, pluck="name"
+		"Press Workflow",
+		{
+			"linked_doctype": ["in", ["Stalwart Node", "Stalwart Cluster"]],
+			"linked_docname": ["in", [*nodes, name]],
+		},
+		pluck="name",
 	):
 		frappe.delete_doc("Press Workflow", workflow, force=True, ignore_permissions=True)
 	for node in nodes:

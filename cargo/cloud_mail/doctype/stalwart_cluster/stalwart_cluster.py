@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import now
+from frappe.utils import add_to_date, cint, get_datetime, now, now_datetime
 
 from cargo.cargo.doctype.dns_zone.dns_zone import settings_zone
 from cargo.cloud_mail.cluster import bootstrap, dns, egress, plan, reconcile
@@ -13,9 +13,11 @@ from cargo.cloud_mail.stalwart.credentials import Credential
 from cargo.cloud_mail.tenancy import events
 from cargo.cloud_mail.utils import dkim_algorithms, log_exception, validate_version
 from cargo.service import configure_service_webhook
+from cargo.workflow_engine.doctype.press_workflow.decorators import flow, task
+from cargo.workflow_engine.doctype.press_workflow.workflow_builder import WorkflowBuilder
 
 
-class StalwartCluster(Document):
+class StalwartCluster(WorkflowBuilder):
 	# begin: auto-generated types
 	# This code is auto-generated. Do not modify anything in this block.
 
@@ -102,6 +104,7 @@ class StalwartCluster(Document):
 			if frappe.db.exists("DocType", doctype) and frappe.db.exists(doctype, {"cluster": self.name}):
 				frappe.throw(_("Remove every {0} of this cluster first.").format(_(doctype)))
 		dns.delete_cluster_records(self)
+		super().on_trash()
 
 	# --- validation -----------------------------------------------------------
 
@@ -261,10 +264,104 @@ class StalwartCluster(Document):
 			)
 		client.domains.replace_dkim_keys(domain["id"], dkim_algorithms())
 
+	# --- rolling upgrade --------------------------------------------------------------------
+
+	@frappe.whitelist()
+	def upgrade_nodes(self) -> None:
+		"""Upgrade every Active node to the cluster's version, one at a time: drain, install,
+		restart, wait for the lease, soak with the cluster Healthy, then the next."""
+		frappe.only_for("System Manager")
+		if self.status != "Active":
+			frappe.throw(_("Only an Active cluster is upgraded."))
+		if running_flows(self):
+			frappe.throw(_("Another upgrade or provisioning flow is running on this cluster."))
+		if not upgrade_order(self):
+			frappe.throw(_("No Active node to upgrade."))
+		self._upgrade_nodes.run_as_workflow()
+
+	@flow
+	def _upgrade_nodes(self) -> None:
+		for name in upgrade_order(self):
+			if not self.upgrade_node(name):
+				return
+			self.wait_until_serving(name)
+			self.soak(name)
+
+	@task(queue="long", timeout=3 * (bootstrap.INSTALL_TIMEOUT + bootstrap.BOOTSTRAP_TIMEOUT))
+	def upgrade_node(self, name: str) -> bool:
+		"""Drain one node, put the cluster's version on it and restart it. A failure leaves
+		the node out of ingress with its log, and the flow stops here."""
+		node = frappe.get_doc("Stalwart Node", name)
+		bootstrap.drain_node(node, drained_by="Upgrade")
+		installed = bootstrap.run_script(
+			node, "install.sh", bootstrap.install_environment(node), [], bootstrap.INSTALL_TIMEOUT
+		)
+		if installed is None:
+			return False
+		environment = {"WAIT_PORTS": bootstrap.wait_ports(node)}
+		output = bootstrap.run_script(node, "upgrade.sh", environment, [], bootstrap.BOOTSTRAP_TIMEOUT)
+		if output is None:
+			return False
+		bootstrap.after_upgrade(node, bootstrap.installed_version_from(output) or self.stalwart_version)
+		return True
+
+	@task
+	def wait_until_serving(self, name: str) -> None:
+		"""Back into ingress once the node holds an active lease; tried again until it does."""
+		node = frappe.get_doc("Stalwart Node", name)
+		if node.status == "Failed":
+			frappe.throw(_("{0} did not come back: {1}").format(name, node.last_error))
+		if node.status != "Active":
+			bootstrap.check_node(node)
+			node.reload()
+		if node.status != "Active":
+			self.defer_current_task(f"{name} has no active lease yet")
+
+	@task
+	def soak(self, name: str) -> None:
+		"""Watch the upgraded node serve for soak_minutes with the cluster Healthy before the
+		next one is touched. Critical stops the upgrade where it is."""
+		self.reload()
+		if self.health == "Critical":
+			frappe.throw(
+				_("The cluster is critical after upgrading {0}: {1}").format(name, self.health_reason)
+			)
+		since = frappe.db.get_value("Stalwart Node", name, "provisioned_at")
+		minutes = cint(frappe.get_cached_doc("Mail Settings").soak_minutes) or 10
+		if self.health != "Healthy" or now_datetime() < add_to_date(get_datetime(since), minutes=minutes):
+			self.defer_current_task(f"soaking {name}")
+
 	@frappe.whitelist()
 	def show_admin_password(self) -> str:
 		frappe.only_for("Administrator")
 		return self.get_password("admin_password")
+
+
+def upgrade_order(cluster: Document) -> list[str]:
+	"""Active nodes by name, the bootstrap node last: it carries the lease the others watch."""
+	names = frappe.get_all(
+		"Stalwart Node",
+		{"cluster": cluster.name, "status": "Active", "enabled": 1},
+		pluck="name",
+		order_by="name",
+	)
+	return [n for n in names if n != cluster.bootstrap_node] + [
+		n for n in names if n == cluster.bootstrap_node
+	]
+
+
+def running_flows(cluster: Document) -> list[str]:
+	"""Workflows still running on this cluster or any of its nodes."""
+	nodes = frappe.get_all("Stalwart Node", {"cluster": cluster.name}, pluck="name")
+	return frappe.get_all(
+		"Press Workflow",
+		filters=[
+			["status", "in", ["Queued", "Running"]],
+			["linked_docname", "in", [cluster.name, *nodes]],
+			["linked_doctype", "in", ["Stalwart Cluster", "Stalwart Node"]],
+		],
+		pluck="name",
+	)
 
 
 def check_all_clusters() -> None:

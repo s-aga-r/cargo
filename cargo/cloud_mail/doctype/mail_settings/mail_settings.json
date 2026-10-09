@@ -10,6 +10,7 @@
   "require_domain_grant",
   "verify_stalwart_tls",
   "host_firewall",
+  "soak_minutes",
   "jobs_section",
   "column_break_jobs",
   "dmarc_report_retention_days",
@@ -57,6 +58,13 @@
    "fieldname": "host_firewall",
    "fieldtype": "Check",
    "label": "Host Firewall"
+  },
+  {
+   "default": "10",
+   "description": "How long a rolling upgrade watches an upgraded node serve, with the cluster Healthy, before it moves to the next.",
+   "fieldname": "soak_minutes",
+   "fieldtype": "Int",
+   "label": "Soak Minutes"
   },
   {
    "fieldname": "jobs_section",
@@ -113,7 +121,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-09 13:56:49.310507",
+ "modified": "2026-10-09 14:03:50.360393",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Mail Settings",
