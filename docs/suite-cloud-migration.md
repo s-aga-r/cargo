@@ -279,7 +279,7 @@ Finished before Stalwart Cluster, Postgres, Valkey or SFU is written. The two ex
 
 Porting Datum Server fixes a bug it has today: `sync_machines` compares `Machine.status` (`Broken`, `Terminated`) against Atlas's `DEAD_STATES` (`failed`), so a dead datum machine is never marked Failed. `single_machine_sync` uses `DEAD_MACHINE_STATES`.
 
-Ends when `test_spawn.py`, `test_object_storage_cluster.py`, `test_datum_server.py`, `api/test_webhooks.py` and the health tests pass unchanged, and `docs/service.md` describes the pattern. Rollback: revert; the two services behave as before.
+Done on 2026-10-09; the two assertions that pinned `fd00::/8` now pin `fdaa::/16`. Ends when `test_spawn.py`, `test_object_storage_cluster.py`, `test_datum_server.py`, `api/test_webhooks.py` and the health tests pass unchanged, and `docs/service.md` describes the pattern. Rollback: revert; the two services behave as before.
 
 ### Phase 3a: Provisioning, locally
 
