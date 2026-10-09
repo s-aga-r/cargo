@@ -37,6 +37,7 @@ class Machine(Document):
 		disk_size_gb: DF.Int
 		error: DF.SmallText | None
 		last_synced_at: DF.Datetime | None
+		public_ipv4: DF.Data | None
 		ram_gb: DF.Int
 		reference_doctype: DF.Link
 		reference_name: DF.DynamicLink
@@ -64,6 +65,8 @@ class Machine(Document):
 		base_image: str,
 		zone: str = "",
 		ssh_keypair: tuple[str, str] | None = None,
+		public_ipv4: bool = False,
+		firewall: dict | None = None,
 	) -> Machine:
 		"""Record a machine and ask Atlas to build it, returning the row. Throws with the
 		row rolled back, so nothing is left claiming a VM that was never made."""
@@ -84,11 +87,13 @@ class Machine(Document):
 			}
 		).insert(ignore_permissions=True)
 
-		machine.vm_id = machine.build(spec, base_image)
+		machine.vm_id = machine.build(spec, base_image, public_ipv4=public_ipv4, firewall=firewall)
 		machine.record("Pending")
 		return machine
 
-	def build(self, spec: NodeSpec, base_image: str) -> str:
+	def build(
+		self, spec: NodeSpec, base_image: str, public_ipv4: bool = False, firewall: dict | None = None
+	) -> str:
 		"""Ask Atlas to build this machine, and return the id it goes by."""
 		from cargo.atlas_client import AtlasClient
 
@@ -102,6 +107,8 @@ class Machine(Document):
 				public_key=self.ssh_public_key,
 				hostname=self.name,
 				metadata={"role": self.role},
+				public_ipv4=public_ipv4,
+				firewall=firewall,
 			)
 		except Exception:
 			frappe.log_error(
@@ -172,7 +179,9 @@ class Machine(Document):
 		if state != RUNNING_STATE:
 			return self.record(self.status)
 
-		self.address = payload.get("network", {}).get("mesh_ipv6")
+		network = payload.get("network", {})
+		self.address = network.get("mesh_ipv6")
+		self.public_ipv4 = network.get("public_ipv4")
 		if not self.address:
 			return self.record("Broken", error="Atlas reported no mesh address")
 

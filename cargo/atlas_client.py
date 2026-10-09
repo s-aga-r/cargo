@@ -95,22 +95,29 @@ class AtlasClient:
 		public_key: str,
 		hostname: str,
 		metadata: dict[str, str] | None = None,
+		public_ipv4: bool = False,
+		firewall: dict[str, Any] | None = None,
 	) -> dict[str, Any]:
-		"""Ask Atlas for one machine and return the record it made."""
-		created = self.call(
-			"POST",
-			"/virtual-machines",
-			{
-				"image_id": image_id,
-				"cpu_millicores": cpu_millicores,
-				"memory_mib": memory_mib,
-				"disk_mib": disk_mib,
-				"ssh_keys": [public_key],
-				"hostname": hostname,
-				"metadata": metadata or {},
-				"ipv4_internet_access": True,
-			},
-		)
+		"""Ask Atlas for one machine and return the record it made.
+
+		Most machines are reached over the mesh alone. A service the Internet must reach, such
+		as mail, asks for a public address and says what may come in; both are asked for only
+		when set, so a machine that needs neither is requested as it always was."""
+		body = {
+			"image_id": image_id,
+			"cpu_millicores": cpu_millicores,
+			"memory_mib": memory_mib,
+			"disk_mib": disk_mib,
+			"ssh_keys": [public_key],
+			"hostname": hostname,
+			"metadata": metadata or {},
+			"ipv4_internet_access": True,
+		}
+		if public_ipv4:
+			body["public_ipv4"] = True
+		if firewall:
+			body["firewall"] = firewall
+		created = self.call("POST", "/virtual-machines", body)
 		if not isinstance(created, dict) or not created.get("id"):
 			raise AtlasError(f"create_virtual_machine returned no id: {created!r}")
 

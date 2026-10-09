@@ -13,6 +13,7 @@
   "column_break_state",
   "status",
   "address",
+  "public_ipv4",
   "last_synced_at",
   "storage_section",
   "cpu_millicores",
@@ -95,6 +96,13 @@
    "read_only": 1
   },
   {
+   "description": "The public address Atlas gave this machine, when one was asked for. DNS and SPF use it; Cargo itself never does.",
+   "fieldname": "public_ipv4",
+   "fieldtype": "Data",
+   "label": "Public IPv4",
+   "read_only": 1
+  },
+  {
    "fieldname": "last_synced_at",
    "fieldtype": "Datetime",
    "label": "Last Synced At",
@@ -167,7 +175,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-09 12:00:14.485714",
+ "modified": "2026-10-09 12:21:30.719747",
  "modified_by": "Administrator",
  "module": "Cargo",
  "name": "Machine",
