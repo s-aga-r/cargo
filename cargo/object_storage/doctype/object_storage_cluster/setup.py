@@ -13,6 +13,7 @@ from frappe.utils.password import get_decrypted_password
 from cargo.atlas_client import host_port
 from cargo.client_models import GATEWAY, STORAGE
 from cargo.object_storage.client import Client, Error
+from cargo.service import TRUSTED_PROXIES, wildcard_domain
 from cargo.ssh import run_over_ssh, script
 
 BINARY_URL = "https://garagehq.deuxfleurs.fr/_releases/{version}/{arch}/garage"
@@ -20,7 +21,6 @@ CONF = ("object_storage", "conf", "garage")
 NGINX_CONF = ("object_storage", "conf", "nginx", "install.sh")
 # Who may say where a request came from. The proxy reaches the gateway over the mesh, and a
 # unique-local address cannot arrive from the internet, so no client can forge the header.
-TRUSTED_PROXIES = ("127.0.0.1", "::1", "fd00::/8")
 GIGABYTE = 1000**3
 #: `Machine.name`, e.g. ``OSC-0001-storage-0001``.
 MachineName = str
@@ -138,11 +138,7 @@ class Setup(Client):
 	@cached_property
 	def wildcard_domain(self) -> str:
 		"""The domain the gateway's subdomains hang off."""
-		domain = frappe.db.get_single_value("Cargo Settings", "wildcard_domain")
-		if not domain:
-			frappe.throw(_("Set a Wildcard Domain in Cargo Settings before setting up a gateway."))
-
-		return domain
+		return wildcard_domain()
 
 	def install_environment(self, machine: MachineRow) -> dict[str, str]:
 		"""What a node needs to write its own garage.toml and unit."""

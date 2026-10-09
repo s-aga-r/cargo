@@ -15,23 +15,28 @@ from cargo.cargo.doctype.machine.machine import DEAD_MACHINE_STATES
 from cargo.cargo.doctype.machine.machine import Machine as MachineDoc
 from cargo.client_models import GATEWAY, STORAGE, NodeSpec, Role
 from cargo.object_storage.doctype.object_storage_cluster.setup import Setup
-from cargo.proxy_client import ProxyClient, ProxyError
+from cargo.proxy_client import ProxyError
+from cargo.service import (
+	REGION_HEADER,
+	REPORTED_STATUSES,
+	SOURCE,
+	SOURCE_HEADER,
+	configure_service_webhook,
+	publish_routes,
+	service_domain,
+	service_endpoint,
+	wildcard_domain,
+)
 from cargo.ssh import SSH_TIMEOUT, OutputLog
 from cargo.workflow_engine.doctype.press_workflow.decorators import flow, task
 from cargo.workflow_engine.doctype.press_workflow.workflow_builder import WorkflowBuilder
 
 if typing.TYPE_CHECKING:
-	from frappe.integrations.doctype.webhook.webhook import Webhook
-
-	from cargo.cargo.doctype.cargo_settings.cargo_settings import CargoSettings
+	from cargo.cargo.doctype.machine.machine import Machine
 
 # Garage wants a 32-byte hex string for its rpc_secret, which is 64 characters of one.
 SECRET_LENGTH = 64
 MACHINE_STEP_TIMEOUT = 3 * SSH_TIMEOUT
-SOURCE_HEADER = "X-FC-Source"
-REGION_HEADER = "X-FC-Region"
-SOURCE = "cargo"
-REPORTED_STATUSES = ("Active", "Failed")
 CLUSTER_SECRETS = ("rpc_secret", "admin_token", "metrics_token")
 S3_SITE_NAME = "s3-svc"
 S3_ADMIN_SITE_NAME = "s3-admin-svc"
@@ -122,20 +127,16 @@ class ObjectStorageCluster(WorkflowBuilder):
 
 	@property
 	def wildcard_domain(self) -> str:
-		domain = frappe.db.get_single_value("Cargo Settings", "wildcard_domain", cache=True)
-		if not domain:
-			frappe.throw(_("Wildcard Domain must be set in Cargo Settings."))
-
-		return domain
+		return wildcard_domain()
 
 	@property
 	def proxy_domains(self) -> tuple[str, ...]:
-		return tuple(f"{site_name}.{self.wildcard_domain}" for site_name in PROXY_SITE_NAMES)
+		return tuple(service_domain(site_name) for site_name in PROXY_SITE_NAMES)
 
 	@property
 	def service_endpoint(self) -> str:
 		"""The S3 URL users reach this cluster at, served by nginx on the gateway."""
-		return f"https://{S3_SITE_NAME}.{self.wildcard_domain}"
+		return service_endpoint(S3_SITE_NAME)
 
 	def validate(self) -> None:
 		if self.status == "Active":
@@ -332,9 +333,7 @@ class ObjectStorageCluster(WorkflowBuilder):
 	def publish_proxy_routes(self) -> bool:
 		"""Publish the regional S3 routes to this cluster's gateway."""
 		try:
-			client = ProxyClient.from_settings()
-			for domain in self.proxy_domains:
-				client.map_domain(domain, self.gateway_address)
+			publish_routes(self.proxy_domains, self.gateway_address)
 		except (ProxyError, frappe.ValidationError) as error:
 			self.mark_cluster_status("Failed", _(f"Proxy route setup failed: {error}"))
 			return False
@@ -497,42 +496,7 @@ def webhook_name_for(cluster: str) -> str:
 
 def configure_storage_cluster_webhook(cluster: ObjectStorageCluster) -> None:
 	"""Point a Frappe Webhook at Central so this cluster reports its own status changes."""
-	settings: CargoSettings = frappe.get_cached_doc("Cargo Settings")
-	if not settings.central_webhook_url:
-		raise frappe.ValidationError(
-			_("Central has not enrolled this Cargo yet, so there is nowhere to report to.")
-		)
+	configure_service_webhook(cluster, "storage", webhook_name_for(cluster.name), cluster.service_endpoint)
 
-	secret = settings.get_password("central_webhook_secret", raise_exception=True)
-	name = webhook_name_for(cluster.name)
-	webhook: Webhook = (
-		frappe.get_doc("Webhook", name) if frappe.db.exists("Webhook", name) else frappe.new_doc("Webhook")
-	)
-	webhook.name = name
-	webhook.update(
-		{
-			"webhook_doctype": cluster.doctype,
-			"webhook_docevent": "on_update",
-			"request_url": settings.central_webhook_url,
-			"request_method": "POST",
-			"request_structure": "JSON",
-			"condition": f"doc.status in {REPORTED_STATUSES}",
-			"webhook_json": frappe.as_json(
-				{
-					"region": settings.region,
-					"region_id": settings.region_id,
-					"service": "storage",
-					"status": "{{ 'Available' if doc.status == 'Active' else 'Not Available' }}",
-					"service_endpoint": cluster.service_endpoint,
-				}
-			),
-			"webhook_headers": [
-				{"key": SOURCE_HEADER, "value": SOURCE},
-				{"key": REGION_HEADER, "value": settings.region},
-			],
-			"enable_security": True,
-			"webhook_secret": secret,
-			"enabled": settings.central_webhook_enabled,
-		}
-	)
-	webhook.save(ignore_permissions=True)
+
+__all__ = ["REGION_HEADER", "REPORTED_STATUSES", "SOURCE", "SOURCE_HEADER", "ObjectStorageCluster"]
