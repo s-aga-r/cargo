@@ -1079,6 +1079,12 @@ class TestEntitlement(TenancyTestCase):
 		group = frappe.get_doc({"doctype": "Mail Group", "email": "team@acme.com", "site": self.site.name})
 		self.assertRaisesRegex(frappe.ValidationError, "Mailboxes are not available", group.insert)
 
+	def test_a_domain_is_not_moved_between_sites(self) -> None:
+		other = make_site(self.cluster, "other.frappe.test")
+		domain = self.make_domain()
+		domain.site = other.name
+		self.assertRaisesRegex(frappe.ValidationError, "not moved between sites", domain.save)
+
 	def test_withdrawing_mailboxes_reaches_what_the_site_already_has(self) -> None:
 		domain = self.make_domain()
 		account = self.make_account("inbox@acme.com")

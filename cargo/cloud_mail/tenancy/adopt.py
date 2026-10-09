@@ -15,7 +15,7 @@ from frappe import _
 from frappe.utils import cint
 
 from cargo.cloud_mail.cluster.plan import DISABLED_ROLE_DESCRIPTION
-from cargo.cloud_mail.cluster.reconcile import INFRA_ACCOUNTS
+from cargo.cloud_mail.cluster.reconcile import infra_addresses
 from cargo.cloud_mail.stalwart.directory import RECEIVE_PERMISSION
 
 SAVEPOINT = "adopt_object"
@@ -87,12 +87,16 @@ def _adopt_domains(site, cluster, client, report: Report) -> dict[str, str]:
 		]
 	):
 		name = live["name"]
-		names[live["id"]] = name
 		if name == cluster.default_domain:
-			continue
+			continue  # the platform's: nothing on it is a site's to take
 		if frappe.db.exists("Mail Domain", name):
-			report.skip("Mail Domain", name, _("already exists"))
+			if frappe.db.get_value("Mail Domain", name, "site") == site.name:
+				names[live["id"]] = name
+				report.skip("Mail Domain", name, _("already exists"))
+			else:
+				report.skip("Mail Domain", name, _("not this site's"))  # Central's or another's
 			continue
+		names[live["id"]] = name
 		enabled = bool(live.get("isEnabled"))
 		_insert(
 			report,
@@ -146,7 +150,7 @@ def _adopt_groups(site, groups: list[dict], domains: dict[str, str], report: Rep
 
 def _adopt_accounts(site, users: list[dict], domains, groups, disabled_role_id, report: Report) -> None:
 	for live in users:
-		if live.get("name") in INFRA_ACCOUNTS:
+		if live.get("emailAddress") in infra_addresses(site.get_cluster()):
 			continue
 		email = _address(live, domains)
 		if not email:

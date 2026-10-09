@@ -106,6 +106,27 @@ class TestEgress(IntegrationTestCase):
 			"203.0.113.60",
 		)
 
+	def test_a_gateway_that_comes_up_enters_its_pools_records(self) -> None:
+		from cargo.cloud_mail.cluster import egress
+
+		pool = self.make_pool(("203.0.113.51",))
+		self.gateway.db_set("status", "Provisioned")
+		self.gateway.reload()
+		with (
+			patch("cargo.cloud_mail.cluster.bootstrap.ensure_api_key"),
+			patch("cargo.cloud_mail.cluster.egress.resync_cluster"),
+			patch.object(type(self.gateway), "get_admin_client"),
+		):
+			self.assertTrue(egress.check_gateway(self.gateway))
+		self.assertEqual(frappe.db.get_value("Egress Gateway", self.gateway.name, "status"), "Active")
+		self.assertTrue(frappe.db.exists("DNS Record", {"managed_by": pool.name, "host": "p1.out"}))
+
+	def test_a_gateway_with_pool_addresses_keeps_its_machine(self) -> None:
+		self.make_pool(("203.0.113.51",))
+		self.gateway.db_set("status", "Failed")
+		self.gateway.reload()
+		self.assertRaisesRegex(frappe.ValidationError, "Remove this gateway", self.gateway.release_machine)
+
 	def test_pool_assigns_ports_hostnames_and_records(self) -> None:
 		pool = self.make_pool(("203.0.113.51", "203.0.113.52"))
 		second = self.make_pool(("203.0.113.53",))

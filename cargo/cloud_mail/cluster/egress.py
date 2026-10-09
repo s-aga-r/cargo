@@ -161,15 +161,11 @@ def expression_rules(expression: dict) -> list[dict]:
 
 
 def current_route_expression(cluster: Document) -> dict:
+	"""What the cluster routes by today. Unreadable is an error, not empty: an empty answer would
+	have the next apply drop every rule an operator added by hand."""
 	if cluster.status != "Active" or not has_credentials(cluster):
 		return {}
-	try:
-		return (
-			cluster.get_client().singleton("MtaOutboundStrategy").read(properties=["route"]).get("route")
-			or {}
-		)
-	except StalwartError:
-		return {}
+	return cluster.get_client().singleton("MtaOutboundStrategy").read(properties=["route"]).get("route") or {}
 
 
 def apply_pool_changes(pool: Document) -> None:
@@ -467,9 +463,8 @@ def check_gateway(gateway: Document) -> bool:
 		return False
 
 	if gateway.status != "Active":
-		gateway.db_set(
-			{"status": "Active", "last_error": None, "last_config_sync_at": now()}, update_modified=False
-		)
+		gateway.db_set({"last_error": None, "last_config_sync_at": now()}, update_modified=False)
+		gateway.set_status("Active")  # which also writes the gateway into its pools' records
 		resync_cluster(gateway.get_cluster())
 	return True
 

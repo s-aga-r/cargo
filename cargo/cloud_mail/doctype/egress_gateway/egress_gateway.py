@@ -165,6 +165,12 @@ class EgressGateway(WorkflowBuilder):
 	@frappe.whitelist()
 	def release_machine(self) -> None:
 		frappe.only_for("System Manager")
+		if frappe.db.exists("Egress IP Pool Address", {"gateway": self.name}):
+			frappe.throw(
+				_(
+					"Remove this gateway's addresses from every pool first: SPF and the pool hostnames still list them."
+				)
+			)
 		release_machine(self, ("Pending", "Failed", "Disabled"), ipv4_address=None)
 		self.reload()
 		dns.sync_gateway_records(self)

@@ -90,6 +90,10 @@ class MailDomain(Document):
 	def validate(self) -> None:
 		self.domain_name = validate_domain_name(self.domain_name)
 		site = self.get_site()
+		if not self.is_new() and self.has_value_changed("site"):
+			# Reports and objects were attributed to the holder; a domain changes hands by being
+			# deleted and added by the new one, which also proves control afresh.
+			frappe.throw(_("A domain is not moved between sites; delete it and let the new site add it."))
 		self.cluster = site.cluster if site else self.cluster or region_cluster()
 		if self.is_new() and not self.flags.adopting:
 			if not site:

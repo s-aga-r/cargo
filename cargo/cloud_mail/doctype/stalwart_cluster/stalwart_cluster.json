@@ -342,11 +342,12 @@
    "read_only": 1
   },
   {
-   "description": "Generated on save; pushed to the gateways with their configuration.",
+   "description": "Generated once; the gateways' relay accounts are created with it. Changing it would not reach an account that already exists, so it is not editable.",
    "fieldname": "relay_password",
    "fieldtype": "Password",
    "hidden": 1,
-   "label": "Relay Password"
+   "label": "Relay Password",
+   "read_only": 1
   },
   {
    "fieldname": "config_tab",
@@ -443,7 +444,7 @@
    "link_fieldname": "cluster"
   }
  ],
- "modified": "2026-10-09 13:45:23.299352",
+ "modified": "2026-10-09 16:04:34.998509",
  "modified_by": "Administrator",
  "module": "Cloud Mail",
  "name": "Stalwart Cluster",

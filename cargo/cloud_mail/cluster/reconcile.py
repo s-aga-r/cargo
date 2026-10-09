@@ -10,7 +10,12 @@ import frappe
 if TYPE_CHECKING:
 	from frappe.model.document import Document
 
-INFRA_ACCOUNTS = {"admin", "relay"}
+INFRA_ACCOUNTS = ("admin", "relay")
+
+
+def infra_addresses(cluster) -> set[str]:
+	"""The cluster's own accounts, by address: a tenant's admin@ is a tenant's."""
+	return {f"{name}@{cluster.default_domain}" for name in INFRA_ACCOUNTS}
 
 
 def directory_report(cluster: Document) -> dict:
@@ -31,7 +36,7 @@ def directory_report(cluster: Document) -> dict:
 	live_accounts = {
 		a.get("emailAddress"): a["id"]
 		for a in client.accounts.get_all(properties=["id", "emailAddress", "name"])
-		if a.get("emailAddress") and a.get("name") not in INFRA_ACCOUNTS
+		if a.get("emailAddress") and a.get("emailAddress") not in infra_addresses(cluster)
 	}
 	ours_accounts = {
 		a.email: a.stalwart_id
