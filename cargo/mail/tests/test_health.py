@@ -154,7 +154,7 @@ class TestMailHealth(MailClusterTestCase):
 		self.assertEqual((first.status, first.drained_by), ("Draining", "Operator"))
 
 	def test_a_node_whose_machine_died_is_failed_and_out_of_spf(self) -> None:
-		first, second = self.nodes
+		second = self.nodes[1]
 		machine = frappe.get_doc(
 			{
 				"doctype": "Machine",

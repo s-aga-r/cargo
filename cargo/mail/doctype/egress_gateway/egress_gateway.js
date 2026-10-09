@@ -1,45 +1,76 @@
 // Copyright (c) 2026, Frappe Technologies Pvt. Ltd. and contributors
 // For license information, please see license.txt
 
-frappe.ui.form.on('Egress Gateway', {
+frappe.ui.form.on("Egress Gateway", {
 	refresh(frm) {
-		if (frm.doc.__islocal) return
-		frm.add_custom_button(__('Preview Plan'), () => frm.events.call(frm, 'preview_plan', __('Rendering...'), (plan) => {
-			frappe.msgprint({ title: __('Gateway Plan'), message: `<pre>${frappe.utils.escape_html(plan)}</pre>`, wide: true })
-		}), __('Actions'))
-		if (frm.doc.status === 'Provisioned') {
-			frm.add_custom_button(__('Check Health'), () => frm.events.call(frm, 'check_health', __('Checking...')), __('Actions'))
-		}
-		if (frm.doc.status === 'Active') {
-			frm.add_custom_button(__('Sync Config'), () => frm.events.call(frm, 'sync_config', __('Syncing...')), __('Actions'))
+		if (frm.doc.__islocal) return;
+		frm.add_custom_button(
+			__("Preview Plan"),
+			() =>
+				frm.events.call(frm, "preview_plan", __("Rendering..."), (plan) => {
+					frappe.msgprint({
+						title: __("Gateway Plan"),
+						message: `<pre>${frappe.utils.escape_html(plan)}</pre>`,
+						wide: true,
+					});
+				}),
+			__("Actions")
+		);
+		if (frm.doc.status === "Provisioned") {
 			frm.add_custom_button(
-				__('Replace DKIM Keys'),
-				() =>
-					frappe.confirm(__('Generate new DKIM keys for {0}? Without a DNS provider on the zone the new records must be published by hand.', [frm.doc.hostname]), () =>
-						frm.events.call(frm, 'replace_dkim_keys', __('Replacing keys...')),
-					),
-				__('Actions'),
-			)
+				__("Check Health"),
+				() => frm.events.call(frm, "check_health", __("Checking...")),
+				__("Actions")
+			);
 		}
-		if (frappe.session.user === 'Administrator') {
-			frm.add_custom_button(__('Show Admin Password'), () => frm.trigger('show_admin_password'), __('Access'))
+		if (frm.doc.status === "Active") {
+			frm.add_custom_button(
+				__("Sync Config"),
+				() => frm.events.call(frm, "sync_config", __("Syncing...")),
+				__("Actions")
+			);
+			frm.add_custom_button(
+				__("Replace DKIM Keys"),
+				() =>
+					frappe.confirm(
+						__(
+							"Generate new DKIM keys for {0}? Without a DNS provider on the zone the new records must be published by hand.",
+							[frm.doc.hostname]
+						),
+						() => frm.events.call(frm, "replace_dkim_keys", __("Replacing keys..."))
+					),
+				__("Actions")
+			);
+		}
+		if (frappe.session.user === "Administrator") {
+			frm.add_custom_button(
+				__("Show Admin Password"),
+				() => frm.trigger("show_admin_password"),
+				__("Access")
+			);
 		}
 	},
 
 	show_admin_password(frm) {
 		frappe.call({
 			doc: frm.doc,
-			method: 'show_admin_password',
+			method: "show_admin_password",
 			freeze: true,
-			freeze_message: __('Fetching...'),
+			freeze_message: __("Fetching..."),
 			callback: (r) => {
-				if (r.exc) return
+				if (r.exc) return;
 				frappe.msgprint({
-					title: __('Admin Password'),
-					message: `${__('Web admin')}: <a href="${frm.doc.base_url}" target="_blank">${frm.doc.base_url}</a><br>${__('Username')}: <code>${frappe.utils.escape_html(frm.doc.admin_username)}</code><br>${__('Password')}: <code>${frappe.utils.escape_html(r.message)}</code>`,
-				})
+					title: __("Admin Password"),
+					message: `${__("Web admin")}: <a href="${frm.doc.base_url}" target="_blank">${
+						frm.doc.base_url
+					}</a><br>${__("Username")}: <code>${frappe.utils.escape_html(
+						frm.doc.admin_username
+					)}</code><br>${__("Password")}: <code>${frappe.utils.escape_html(
+						r.message
+					)}</code>`,
+				});
 			},
-		})
+		});
 	},
 
 	call(frm, method, freeze_message, done) {
@@ -49,10 +80,10 @@ frappe.ui.form.on('Egress Gateway', {
 			freeze: true,
 			freeze_message,
 			callback: (r) => {
-				if (r.exc) return
-				frm.reload_doc()
-				if (done) done(r.message)
+				if (r.exc) return;
+				frm.reload_doc();
+				if (done) done(r.message);
 			},
-		})
+		});
 	},
-})
+});

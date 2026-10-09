@@ -3,9 +3,15 @@
 
 const HEADLINES = {
 	Draft: __("Add the machine. Atlas builds it, and setting up starts once it boots."),
-	"Setting Up": __("Installing Postgres and opening it to the mesh. Follow the Setup Log below."),
-	Active: __("Postgres is serving on the mesh. Services get a database each through Postgres Database."),
-	Failed: __("The last run failed. See the Setup Log below, then set up again on the same machine."),
+	"Setting Up": __(
+		"Installing Postgres and opening it to the mesh. Follow the Setup Log below."
+	),
+	Active: __(
+		"Postgres is serving on the mesh. Services get a database each through Postgres Database."
+	),
+	Failed: __(
+		"The last run failed. See the Setup Log below, then set up again on the same machine."
+	),
 };
 
 frappe.ui.form.on("Postgres Server", {
@@ -15,7 +21,9 @@ frappe.ui.form.on("Postgres Server", {
 		if (guidance) frm.dashboard.set_headline(guidance);
 
 		if (!frm.doc.machine && frm.doc.status !== "Setting Up") {
-			frm.add_custom_button(__("Machine"), () => ask_for_machine(frm), __("Add")).addClass("btn-primary");
+			frm.add_custom_button(__("Machine"), () => ask_for_machine(frm), __("Add")).addClass(
+				"btn-primary"
+			);
 		}
 		if (frm.doc.machine && frm.doc.status !== "Setting Up") {
 			const first = frm.doc.status === "Draft";
@@ -27,8 +35,9 @@ frappe.ui.form.on("Postgres Server", {
 		}
 		if (frm.doc.machine && ["Draft", "Failed"].includes(frm.doc.status)) {
 			frm.add_custom_button(__("Release Machine"), () =>
-				frappe.confirm(__("Let this machine go? Atlas terminates it if it still runs."), () =>
-					frm.call("release_machine").then(() => frm.reload_doc())
+				frappe.confirm(
+					__("Let this machine go? Atlas terminates it if it still runs."),
+					() => frm.call("release_machine").then(() => frm.reload_doc())
 				)
 			);
 		}
@@ -43,7 +52,13 @@ frappe.ui.form.on("Postgres Server", {
 function ask_for_machine(frm) {
 	frappe.prompt(
 		[
-			{ fieldname: "cpu_millicores", label: __("CPU (millicores)"), fieldtype: "Int", default: 2000, reqd: 1 },
+			{
+				fieldname: "cpu_millicores",
+				label: __("CPU (millicores)"),
+				fieldtype: "Int",
+				default: 2000,
+				reqd: 1,
+			},
 			{ fieldname: "ram_gb", label: __("RAM (GB)"), fieldtype: "Int", default: 4, reqd: 1 },
 			{
 				fieldname: "disk_gb",
