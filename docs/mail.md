@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Each region runs one Stalwart cluster, and Cargo owns it. Every site in the region gets a send-only address on the region's mail zone; sites entitled to mailboxes add their own domains, accounts, groups and lists through the site API. This document covers the cluster's records, what it needs, how a region builds it by itself, and what to look at when it is unwell. The plan this grew from is [suite-cloud-migration.md](suite-cloud-migration.md).
+Each region runs one Stalwart cluster, and Cargo owns it. Every site in the region gets a send-only address on the region's mail zone; sites entitled to mailboxes add their own domains, accounts, groups and lists through the site API. This document covers the cluster's records, what it needs, how a region builds it by itself, and what to look at when it is unwell. How the pieces fit and talk to each other is drawn in [architecture.md](architecture.md); the plan this grew from is [suite-cloud-migration.md](suite-cloud-migration.md).
 
 ## Records
 
