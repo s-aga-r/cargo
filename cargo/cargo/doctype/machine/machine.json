@@ -14,6 +14,7 @@
   "status",
   "address",
   "public_ipv4",
+  "public_ip_id",
   "last_synced_at",
   "storage_section",
   "cpu_millicores",
@@ -103,6 +104,13 @@
    "read_only": 1
   },
   {
+   "description": "The public IP allocation Atlas reserved for this machine. Released once the machine is terminated.",
+   "fieldname": "public_ip_id",
+   "fieldtype": "Data",
+   "label": "Public IP ID",
+   "read_only": 1
+  },
+  {
    "fieldname": "last_synced_at",
    "fieldtype": "Datetime",
    "label": "Last Synced At",
@@ -175,7 +183,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-10-09 12:21:30.719747",
+ "modified": "2026-10-13 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Cargo",
  "name": "Machine",

@@ -8,6 +8,7 @@ from frappe.tests import UnitTestCase
 from cargo.atlas_client import (
 	BASE_IMAGE_TAGS,
 	AtlasClient,
+	AtlasConflict,
 	AtlasError,
 	AtlasNotFound,
 	error_message,
@@ -75,13 +76,39 @@ class UnitTestAtlasClient(UnitTestCase):
 				disk_mib=10240,
 				public_key="ssh-ed25519 AAAA",
 				hostname="SC-0001-mail-0001",
-				public_ipv4=True,
+				public_ipv4="ip-1",
 				firewall=rules,
 			)
 
 		body = request.call_args.kwargs["json"]
-		self.assertTrue(body["public_ipv4"])
+		self.assertEqual(body["public_ipv4"], "ip-1")
 		self.assertEqual(body["firewall"], rules)
+
+	def test_a_public_address_is_reserved_by_version(self):
+		with self.call(response(201, {"id": "ip-1", "prefix": "203.0.113.10/32"})) as request:
+			self.assertEqual(self.client.reserve_public_ip(), "ip-1")
+
+		self.assertEqual(request.call_args.args[0], "POST")
+		self.assertTrue(request.call_args.args[1].endswith("/public-ips"))
+		self.assertEqual(request.call_args.kwargs["json"], {"version": 4})
+
+	def test_a_reservation_without_an_id_is_a_failure(self):
+		with self.call(response(201, {})), self.assertRaises(AtlasError):
+			self.client.reserve_public_ip()
+
+	def test_releasing_an_address_deletes_its_allocation(self):
+		with self.call(response(204)) as request:
+			self.client.release_public_ip("ip-1")
+
+		self.assertEqual(request.call_args.args[0], "DELETE")
+		self.assertTrue(request.call_args.args[1].endswith("/public-ips/ip-1"))
+
+	def test_an_address_still_attached_is_a_conflict(self):
+		payload = {"error": {"code": "public_ip_in_use", "message": "Detach this public IP first."}}
+		with self.call(response(409, payload)), self.assertRaises(AtlasConflict) as raised:
+			self.client.release_public_ip("ip-1")
+
+		self.assertIn("Detach", str(raised.exception))
 
 	def test_a_created_machine_without_an_id_is_a_failure(self):
 		with self.call(response(201, {})), self.assertRaises(AtlasError):

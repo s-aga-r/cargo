@@ -50,6 +50,7 @@ class TestMailSpawn(IntegrationTestCase):
 		client = patch("cargo.atlas_client.AtlasClient.from_settings").start()
 		self.addCleanup(patch.stopall)
 		client.return_value.find_system_image.return_value = "img-ubuntu"
+		client.return_value.reserve_public_ip.return_value = "ip-1"
 		client.return_value.create_vm.side_effect = lambda **kwargs: {
 			"id": f"vm-{frappe.generate_hash(length=8)}"
 		}
@@ -105,7 +106,7 @@ class TestMailSpawn(IntegrationTestCase):
 		self.assertEqual(len(nodes), 1)
 		self.assertTrue(nodes[0].machine)
 		self.assertEqual(atlas.create_vm.call_args.kwargs["cpu_millicores"], 2000)
-		self.assertTrue(atlas.create_vm.call_args.kwargs["public_ipv4"])
+		self.assertEqual(atlas.create_vm.call_args.kwargs["public_ipv4"], "ip-1")
 
 		# The rest wait for the cluster to serve: the first node brings the store up alone.
 		with self.configured():

@@ -79,7 +79,7 @@ sequenceDiagram
     participant Node as Node machine
     participant Stalwart as Stalwart on the node
     participant Central
-    Cargo->>Atlas: create VM (role mail, public_ipv4, firewall: 25/465/587/143/993/110/995/443/4190 + mesh)
+    Cargo->>Atlas: reserve a public IPv4, then create VM (role mail, that allocation, firewall: 25/465/587/143/993/110/995/443/4190 + mesh)
     Atlas-->>Cargo: Pending → Running, mesh address, public IPv4
     Note over Cargo: sync_pending_machines copies the public IPv4 onto the node and publishes n1.<zone> A; provisioning starts
     Cargo->>Node: install.sh over SSH (binaries behind a symlink, Unbound with DNSSEC, the systemd unit)
@@ -203,7 +203,7 @@ sequenceDiagram
     participant Central
     participant Pilot
     participant Browser
-    Cargo->>Atlas: create VM (role sfu, public_ipv4, firewall: 80, 443, one UDP port per worker from 40000)
+    Cargo->>Atlas: reserve a public IPv4, then create VM (role sfu, that allocation, firewall: 80, 443, one UDP port per worker from 40000)
     Atlas-->>Cargo: Running with a public IPv4
     Cargo->>Cargo: publish sfu.<zone> A → the public IPv4
     Cargo->>Machine: install.sh over SSH: Docker, the Suite project's deployment from a pinned frappe/suite ref, its .env, deploy.sh setup

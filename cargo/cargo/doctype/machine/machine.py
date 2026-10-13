@@ -10,7 +10,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import now_datetime
 
-from cargo.atlas_client import DEAD_STATES, MIB_PER_GB, RUNNING_STATE, AtlasNotFound
+from cargo.atlas_client import DEAD_STATES, MIB_PER_GB, RUNNING_STATE, AtlasConflict, AtlasNotFound
 from cargo.client_models import NodeSpec
 from cargo.ssh import HostKeyPin, create_keypair
 
@@ -37,6 +37,7 @@ class Machine(Document):
 		disk_size_gb: DF.Int
 		error: DF.SmallText | None
 		last_synced_at: DF.Datetime | None
+		public_ip_id: DF.Data | None
 		public_ipv4: DF.Data | None
 		ram_gb: DF.Int
 		reference_doctype: DF.Link
@@ -99,11 +100,14 @@ class Machine(Document):
 	def build(
 		self, spec: NodeSpec, base_image: str, public_ipv4: bool = False, firewall: dict | None = None
 	) -> str:
-		"""Ask Atlas to build this machine, and return the id it goes by."""
+		"""Ask Atlas to build this machine, and return the id it goes by. A public address is
+		reserved first: Atlas attaches only an allocation the tenant already holds."""
 		from cargo.atlas_client import AtlasClient
 
 		client = AtlasClient.from_settings()
 		try:
+			if public_ipv4:
+				self.public_ip_id = client.reserve_public_ip()
 			created = client.create_vm(
 				image_id=base_image,
 				cpu_millicores=spec.cpu_millicores,
@@ -112,7 +116,7 @@ class Machine(Document):
 				public_key=self.ssh_public_key,
 				hostname=self.name,
 				metadata={"role": self.role},
-				public_ipv4=public_ipv4,
+				public_ipv4=self.public_ip_id,
 				firewall=firewall,
 			)
 		except Exception:
@@ -120,6 +124,7 @@ class Machine(Document):
 				title=f"{self.reference_name} could not add a {self.role} machine",
 				message=frappe.get_traceback(with_context=False),
 			)
+			self.release_public_ip(client)
 			frappe.throw(_("Atlas would not build this machine. See the Error Log."))
 
 		return created["id"]
@@ -162,6 +167,22 @@ class Machine(Document):
 
 		self.record("Terminated")
 
+		return True
+
+	def release_public_ip(self, client: AtlasClient) -> bool:
+		"""Hand this machine's reserved address back to Atlas. False while Atlas still holds
+		it on the machine: a termination detaches in the background, so the sweep asks again."""
+		if not self.public_ip_id:
+			return True
+
+		try:
+			client.release_public_ip(self.public_ip_id)
+		except AtlasNotFound:
+			pass
+		except AtlasConflict:
+			return False
+
+		self.db_set("public_ip_id", None, update_modified=False)
 		return True
 
 	def sync(self, client: AtlasClient) -> MachineStatus:
@@ -225,3 +246,14 @@ def sync_pending_machines() -> None:
 			frappe.get_doc(doctype, name).sync_machines()
 		except Exception:
 			frappe.log_error(title=f"{name} could not take its machines' new state")
+
+
+def release_public_ips() -> None:
+	"""Return the address of every terminated machine that still holds one. Atlas detaches it
+	after the termination in the background, so a release it refuses is asked again next run."""
+	from cargo.atlas_client import AtlasClient
+
+	client = AtlasClient.from_settings()
+	filters = {"status": "Terminated", "public_ip_id": ["is", "set"]}
+	for name in frappe.get_all("Machine", filters=filters, pluck="name"):
+		frappe.get_doc("Machine", name).release_public_ip(client)

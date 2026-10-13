@@ -53,13 +53,21 @@ A service the Internet must reach is the exception. For it Cargo also sends:
 
 | Send | What it is |
 |---|---|
-| `public_ipv4: true` | Give the machine a public IPv4, reported back as `network.public_ipv4`. Mail nodes need one for SMTP, and Atlas sets its reverse DNS to the hostname Cargo names |
+| `public_ipv4` | The id of a public IPv4 allocation Cargo reserved first (below). Atlas attaches it and reports the address as `network.public_ipv4`. Mail nodes need one for SMTP, and Atlas sets its reverse DNS to the hostname Cargo names |
 | `firewall` | `{"enabled": true, "inbound": [...], "outbound": [...]}`, the shape Central sends for tenant machines: default deny inbound, each rule a protocol, ports and CIDRs. Cargo opens the service's own ports to the world and everything to the mesh prefix `fdaa::/16`; SSH never leaves the mesh |
 
 Traffic from such a machine must leave from its own public address, not the shared uplink:
 mail is judged by the address it comes from. Whether the rules can change on a running
 machine is still to be agreed; until it is, a service that must change them installs `ufw`
 with the same set.
+
+## Reserving a public address, `POST /public-ips`
+
+Atlas attaches only an allocation the tenant already holds, so a machine that needs a public address is built in two calls. Cargo sends `{"version": 4}`, and Atlas picks the pool and sends back the allocation, including its `id`, its `prefix` and `"status": "reserved"`. Cargo keeps the id on the Machine as `public_ip_id` and passes it as `public_ipv4` when it creates the machine. A machine Atlas then refuses to build has its reservation released at once, so a failed request leaves no address behind.
+
+## Releasing a public address, `DELETE /public-ips/{id}`
+
+Terminating a machine does not free its address: Atlas detaches the allocation in a background job and the reservation then stays with the tenant. Atlas answers 409 while the allocation is still attached or detaching, and 204 once it is back in the pool. Every minute Cargo asks for the release of each Terminated machine that still has a `public_ip_id`, clears the id on 204 or 404, and asks again next minute on 409. A Broken machine keeps its address, since it is still running.
 
 ## Checking on a machine — `GET /virtual-machines/{id}`
 

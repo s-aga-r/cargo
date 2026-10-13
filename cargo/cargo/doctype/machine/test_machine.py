@@ -6,8 +6,8 @@ from unittest.mock import Mock, patch
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from cargo.atlas_client import AtlasNotFound
-from cargo.cargo.doctype.machine.machine import Machine
+from cargo.atlas_client import AtlasConflict, AtlasError, AtlasNotFound
+from cargo.cargo.doctype.machine.machine import Machine, release_public_ips
 from cargo.client_models import NodeSpec
 from cargo.testing import use_test_settings
 
@@ -97,6 +97,65 @@ class IntegrationTestMachine(IntegrationTestCase):
 		self.assertEqual(machine.vm_id, "vm-00003")
 		self.assertIsNone(machine.address)
 		self.assertEqual((machine.cpu_millicores, machine.ram_gb, machine.disk_size_gb), (2000, 4, 20))
+		# No public address is asked for: machines are reached over the mesh.
+		atlas.from_settings.return_value.reserve_public_ip.assert_not_called()
+		self.assertIsNone(atlas.from_settings.return_value.create_vm.call_args.kwargs["public_ipv4"])
+
+	def test_a_public_address_is_reserved_before_the_machine_is_asked_for(self):
+		"""Atlas attaches only an allocation the tenant already holds, so the id goes in the
+		create call and stays on the row for the release."""
+		with patch("cargo.atlas_client.AtlasClient") as atlas:
+			client = atlas.from_settings.return_value
+			client.reserve_public_ip.return_value = "ip-7"
+			client.create_vm.return_value = {"id": "vm-00004"}
+			machine = Machine.request(
+				self.cluster,
+				NodeSpec(role="mail", cpu_millicores=1000, ram_gb=2, disk_gb=20),
+				base_image="img-1",
+				public_ipv4=True,
+			)
+
+		self.assertEqual(client.create_vm.call_args.kwargs["public_ipv4"], "ip-7")
+		self.assertEqual(frappe.db.get_value("Machine", machine.name, "public_ip_id"), "ip-7")
+
+	def test_a_build_atlas_refuses_releases_the_reservation(self):
+		with patch("cargo.atlas_client.AtlasClient") as atlas:
+			client = atlas.from_settings.return_value
+			client.reserve_public_ip.return_value = "ip-8"
+			client.create_vm.side_effect = AtlasError("no capacity")
+			with self.assertRaises(frappe.ValidationError):
+				Machine.request(
+					self.cluster,
+					NodeSpec(role="mail", cpu_millicores=1000, ram_gb=2, disk_gb=20),
+					base_image="img-1",
+					public_ipv4=True,
+				)
+
+		client.release_public_ip.assert_called_once_with("ip-8")
+
+	def test_a_terminated_machine_hands_its_address_back(self):
+		self.machine.db_set({"status": "Terminated", "public_ip_id": "ip-9"})
+		with patch("cargo.atlas_client.AtlasClient") as atlas:
+			release_public_ips()
+
+		atlas.from_settings.return_value.release_public_ip.assert_called_once_with("ip-9")
+		self.assertIsNone(frappe.db.get_value("Machine", self.machine.name, "public_ip_id"))
+
+	def test_an_address_atlas_still_holds_on_the_machine_waits_for_the_next_sweep(self):
+		self.machine.db_set({"status": "Terminated", "public_ip_id": "ip-9"})
+		client = Mock()
+		client.release_public_ip.side_effect = AtlasConflict("detaching")
+
+		self.assertFalse(self.machine.release_public_ip(client))
+		self.assertEqual(frappe.db.get_value("Machine", self.machine.name, "public_ip_id"), "ip-9")
+
+	def test_an_address_atlas_no_longer_has_is_forgotten(self):
+		self.machine.db_set("public_ip_id", "ip-9")
+		client = Mock()
+		client.release_public_ip.side_effect = AtlasNotFound("gone")
+
+		self.assertTrue(self.machine.release_public_ip(client))
+		self.assertIsNone(frappe.db.get_value("Machine", self.machine.name, "public_ip_id"))
 
 	def test_a_machine_is_photographed_as_a_cached_system_image(self):
 		"""Both flags are what lets a host build a warm template from the image."""

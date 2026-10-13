@@ -33,6 +33,11 @@ class AtlasNotFound(AtlasError):
 	"""Atlas has no such resource. A terminated machine reads as one."""
 
 
+class AtlasConflict(AtlasError):
+	"""Atlas refused because of the resource's current state, such as a public address still
+	attached to a machine."""
+
+
 class AtlasClient:
 	"""Atlas's tenant API. Every route is scoped to the tenant in the header."""
 
@@ -78,6 +83,9 @@ class AtlasClient:
 		if response.status_code == 404:
 			raise AtlasNotFound(f"{method} {path}: {error_message(payload, response.text)}")
 
+		if response.status_code == 409:
+			raise AtlasConflict(f"{method} {path}: {error_message(payload, response.text)}")
+
 		if not response.ok:
 			raise AtlasError(
 				f"{method} {path} answered {response.status_code}: {error_message(payload, response.text)}"
@@ -95,14 +103,14 @@ class AtlasClient:
 		public_key: str,
 		hostname: str,
 		metadata: dict[str, str] | None = None,
-		public_ipv4: bool = False,
+		public_ipv4: str | None = None,
 		firewall: dict[str, Any] | None = None,
 	) -> dict[str, Any]:
 		"""Ask Atlas for one machine and return the record it made.
 
 		Most machines are reached over the mesh alone. A service the Internet must reach, such
-		as mail, asks for a public address and says what may come in; both are asked for only
-		when set, so a machine that needs neither is requested as it always was."""
+		as mail, hands over a public address it reserved first and says what may come in; both
+		are sent only when set, so a machine that needs neither is requested as it always was."""
 		body = {
 			"image_id": image_id,
 			"cpu_millicores": cpu_millicores,
@@ -114,7 +122,7 @@ class AtlasClient:
 			"ipv4_internet_access": True,
 		}
 		if public_ipv4:
-			body["public_ipv4"] = True
+			body["public_ipv4"] = public_ipv4
 		if firewall:
 			body["firewall"] = firewall
 		created = self.call("POST", "/virtual-machines", body)
@@ -130,6 +138,20 @@ class AtlasClient:
 	def terminate_vm(self, vm_id: str) -> None:
 		"""Start termination. The VM route answers 404 once cleanup finishes."""
 		self.call("DELETE", f"/virtual-machines/{vm_id}")
+
+	def reserve_public_ip(self, version: int = 4) -> str:
+		"""Reserve one public address for the tenant and return the allocation id a machine is
+		then created with. Atlas picks the pool."""
+		reserved = self.call("POST", "/public-ips", {"version": version})
+		if not isinstance(reserved, dict) or not reserved.get("id"):
+			raise AtlasError(f"reserve_public_ip returned no id: {reserved!r}")
+
+		return reserved["id"]
+
+	def release_public_ip(self, public_ip_id: str) -> None:
+		"""Return a reserved address to its pool. Atlas answers 409 while the address is still
+		attached to a machine, including the detach it runs after a termination."""
+		self.call("DELETE", f"/public-ips/{public_ip_id}")
 
 	def create_snapshot(
 		self,

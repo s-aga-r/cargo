@@ -112,6 +112,7 @@ sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd
 """
 
 VMS: dict[str, dict] = {}
+PUBLIC_IPS: dict[str, dict] = {}
 LOCK = threading.Lock()
 atexit.register(shutil.rmtree, METADATA_DIRECTORY, ignore_errors=True)
 
@@ -337,6 +338,63 @@ def network_payload(vm: dict) -> dict:
 	return {"egress": "uplink", "mesh_ipv6": vm["address"], "public_ipv4": public}
 
 
+class PublicIPAttached(Exception):
+	"""The allocation is still on a machine, so it cannot be released."""
+
+
+def reserve_public_ip(version: int) -> dict:
+	"""Reserve one address for the tenant, as Atlas does before a machine can carry it. Every
+	allocation here is the developer's own machine, where the container publishes its ports."""
+	if version != 4:
+		raise ValueError("Only version 4 can be reserved here.")
+	public_ip_id = str(uuid.uuid4())
+	with LOCK:
+		PUBLIC_IPS[public_ip_id] = {"virtual_machine_id": None, "created_at": int(time.time())}
+
+	return public_ip_response(public_ip_id)
+
+
+def public_ip_response(public_ip_id: str) -> dict:
+	allocation = PUBLIC_IPS[public_ip_id]
+
+	return {
+		"id": public_ip_id,
+		"tenant_id": 0,
+		"prefix": f"{FAKE_PUBLIC_IPV4}/32",
+		"version": 4,
+		"status": "attached" if allocation["virtual_machine_id"] else "reserved",
+		"reserved": True,
+		"delivery": "direct",
+		"virtual_machine_id": allocation["virtual_machine_id"],
+		"tags": {},
+		"created_at": allocation["created_at"],
+	}
+
+
+def attach_public_ip(public_ip_id: str, vm_id: str) -> None:
+	"""Atlas attaches only an allocation the tenant reserved and no machine holds."""
+	with LOCK:
+		allocation = PUBLIC_IPS[public_ip_id]
+		if allocation["virtual_machine_id"]:
+			raise ValueError("This public IP is not available.")
+		allocation["virtual_machine_id"] = vm_id
+
+
+def detach_public_ip(vm_id: str) -> None:
+	"""Real Atlas detaches in a background job after the termination; here it is immediate."""
+	with LOCK:
+		for allocation in PUBLIC_IPS.values():
+			if allocation["virtual_machine_id"] == vm_id:
+				allocation["virtual_machine_id"] = None
+
+
+def release_public_ip(public_ip_id: str) -> None:
+	with LOCK:
+		if PUBLIC_IPS[public_ip_id]["virtual_machine_id"]:
+			raise PublicIPAttached()
+		del PUBLIC_IPS[public_ip_id]
+
+
 def allocate_vm(vm_id: str) -> dict:
 	"""Claim the lowest free slot, which fixes the machine's name and both its ports. Claimed
 	under the lock: two concurrent requests would otherwise pick the same one."""
@@ -353,7 +411,7 @@ def allocate_vm(vm_id: str) -> dict:
 			"address": f"{HOST_PREFIX}{slot}",
 			"port": FIRST_PORT + slot - 1,
 			"role": None,
-			"public_ipv4": False,
+			"public_ipv4": None,
 			"container": None,
 			"image_id": None,
 			"metadata_path": None,
@@ -548,6 +606,8 @@ class Handler(BaseHTTPRequestHandler):
 		try:
 			if route == ["virtual-machines"]:
 				self.reply(self.create_virtual_machine(payload), 201)
+			elif route == ["public-ips"]:
+				self.reply(reserve_public_ip(payload.get("version")), 201)
 			elif len(route) == 4 and route[0] == "virtual-machines" and route[2:] == ["actions", "snapshot"]:
 				self.reply(self.create_snapshot(route[1], payload), 201)
 			else:
@@ -569,6 +629,8 @@ class Handler(BaseHTTPRequestHandler):
 				self.reply(self.get_virtual_machine(route[1]))
 			elif route == ["images"]:
 				self.reply(self.list_images())
+			elif len(route) == 2 and route[0] == "public-ips":
+				self.reply(public_ip_response(route[1]))
 			elif len(route) >= 2 and route[0] == "images":
 				self.reply(self.get_image(unquote("/".join(route[1:]))))
 			else:
@@ -603,6 +665,8 @@ class Handler(BaseHTTPRequestHandler):
 		route = self.route
 		if len(route) == 2 and route[0] == "virtual-machines":
 			self.reply(self.terminate(route[1]), 202)
+		elif len(route) == 2 and route[0] == "public-ips":
+			self.release_public_ip(route[1])
 		elif len(route) >= 2 and route[0] == "images":
 			try:
 				self.reply(self.delete_image(unquote("/".join(route[1:]))), 202)
@@ -623,18 +687,20 @@ class Handler(BaseHTTPRequestHandler):
 			image = systemd_image(image)
 
 		vm_id = f"vm-{uuid.uuid4().hex[:8]}"
+		public_ip_id = payload.get("public_ipv4") or None
+		if public_ip_id:
+			attach_public_ip(public_ip_id, vm_id)
 		machine = allocate_vm(vm_id)
 		try:
 			metadata_path = write_vm_metadata(vm_id, metadata)
 		except Exception:
+			detach_public_ip(vm_id)
 			with LOCK:
 				VMS.pop(vm_id, None)
 			raise
 		hostnames = metadata_hostnames(metadata)
 		with LOCK:
-			VMS[vm_id].update(
-				image_id=image_id, metadata_path=metadata_path, public_ipv4=bool(payload.get("public_ipv4"))
-			)
+			VMS[vm_id].update(image_id=image_id, metadata_path=metadata_path, public_ipv4=public_ip_id)
 		write_ssh_config()
 		print(f"-> create {vm_id} ({role or 'no role'})", flush=True)
 		threading.Thread(
@@ -673,6 +739,18 @@ class Handler(BaseHTTPRequestHandler):
 
 	def get_virtual_machine(self, vm_id: str) -> dict:
 		return self.as_response(vm_id)
+
+	def release_public_ip(self, public_ip_id: str) -> None:
+		"""204 once released; 409 while a machine holds it, as Atlas answers until its detach
+		job has run."""
+		try:
+			release_public_ip(public_ip_id)
+		except KeyError:
+			self.fail("The resource does not exist.", 404, "public_ip_not_found")
+		except PublicIPAttached:
+			self.fail("Detach this public IP before you release it.", 409, "public_ip_in_use")
+		else:
+			self.reply(None, 204)
 
 	def create_snapshot(self, vm_id: str, payload: dict) -> dict:
 		"""docker commit is the honest analogue of a disk snapshot."""
@@ -748,6 +826,7 @@ class Handler(BaseHTTPRequestHandler):
 			print(f"  - {vm_id} destroyed", flush=True)
 		if vm:
 			remove_vm_metadata(vm)
+		detach_public_ip(vm_id)
 		with LOCK:
 			VMS.pop(vm_id, None)
 		write_ssh_config()

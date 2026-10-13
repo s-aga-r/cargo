@@ -90,10 +90,11 @@ class TestStalwartCluster(IntegrationTestCase):
 			patch(f"{module}.base_image_id", return_value="img-ubuntu"),
 			patch("cargo.atlas_client.AtlasClient") as atlas,
 		):
+			atlas.from_settings.return_value.reserve_public_ip.return_value = "ip-mail-1"
 			atlas.from_settings.return_value.create_vm.return_value = {"id": "vm-mail-1"}
 			node.request_machine(2000, 4, 40)
 		asked = atlas.from_settings.return_value.create_vm.call_args.kwargs
-		self.assertTrue(asked["public_ipv4"])
+		self.assertEqual(asked["public_ipv4"], "ip-mail-1")
 		rules = asked["firewall"]["inbound"]
 		self.assertIn({"protocol": "any", "cidrs": ["fdaa::/16"]}, rules)
 		self.assertIn({"protocol": "tcp", "ports": "25", "cidrs": ["0.0.0.0/0", "::/0"]}, rules)
